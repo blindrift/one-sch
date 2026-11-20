@@ -6,7 +6,6 @@ import { log } from '../log';
 import type { RequestMeta } from '../request-meta';
 import {
   checkIpRate,
-  LOCK_MS,
   LOCK_THRESHOLD,
   lockUser,
   markAttemptSuccess,
@@ -39,12 +38,12 @@ async function auditRateLimited(action: string, meta: RequestMeta, rate: IpRateR
 }
 
 /**
- * 계정 잠금 감사. 동시 폭주에서는 5번째 실패와 초과 예약(n>5)이 거의 동시에 잠글 수 있으므로
- * 잠금 창(15분)마다 첫 1회만 남긴다.
+ * 잠그고, 이번 호출이 실제로 잠갔을 때만 auth.lock 을 남긴다(DB 조건부 UPDATE 기준).
+ * 동시 폭주에서 5번째 실패와 초과 예약(n>5)이 함께 잠그려 해도 감사는 한 번이고,
+ * 관리자가 잠금을 풀었다가 다시 잠기면 다시 기록된다.
  */
 async function lockAndAudit(userId: string, now: Date, meta: RequestMeta, after: Record<string, unknown>, actorId: string | null = null) {
-  await lockUser(userId, now);
-  if (firstInWindow(`auth.lock:${userId}`, LOCK_MS, now.getTime())) {
+  if (await lockUser(userId, now)) {
     await writeAudit(prisma, { actorId, action: 'auth.lock', entity: 'User', entityId: userId, after, meta });
   }
 }
