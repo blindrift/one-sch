@@ -23,6 +23,8 @@
   "dependencies": {
     "@node-rs/argon2": "2.2.2",
     "@prisma/client": "6.19.3",
+    "@svar-ui/react-core": "2.6.2",
+    "@svar-ui/react-gantt": "2.8.3",
     "class-variance-authority": "0.7.1",
     "cn": "0.5.2",
     "lucide-react": "1.77.0",
