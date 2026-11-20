@@ -42,9 +42,10 @@ export async function gotoReady(page: Page, path: string) {
   await page.locator('html[data-hydrated="true"]').waitFor();
 }
 
-/** 폼 오류 메시지(Next route announcer 의 role=alert 와 구분하려고 test id 로 찾는다) */
-export function formError(page: Page) {
-  return page.getByTestId('form-error');
+/** 화면별 폼 오류 영역(Next route announcer 의 role=alert 와 구분하려고 test id 로 찾는다) */
+export type FormErrorId = 'login-error' | 'change-password-error' | 'admin-users-error' | 'create-user-error';
+export function formError(page: Page, id: FormErrorId) {
+  return page.getByTestId(id);
 }
 
 /** 로그인 폼을 제출하고 결과(이동 또는 오류 표시)가 나올 때까지 기다린다. */
@@ -55,7 +56,7 @@ export async function login(page: Page, username: string, password: string) {
   const before = page.url();
   await page.getByRole('button', { name: '로그인', exact: true }).click();
   await expect
-    .poll(async () => page.url() !== before || (await formError(page).isVisible()), { timeout: 15_000 })
+    .poll(async () => page.url() !== before || (await formError(page, 'login-error').isVisible()), { timeout: 15_000 })
     .toBe(true);
 }
 

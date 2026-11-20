@@ -5,10 +5,10 @@ test.beforeAll(resetAndSeed);
 test('같은 IP 에서 1분에 10회를 넘으면 11번째는 RATE_LIMITED', async ({ page }) => {
   for (let i = 0; i < 10; i++) {
     await login(page, `nobody${i}`, 'x');
-    await expect(formError(page)).toHaveText(INVALID);
+    await expect(formError(page, 'login-error')).toHaveText(INVALID);
   }
   await login(page, 'admin', 'admin');
-  await expect(formError(page)).toHaveText('요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.');
+  await expect(formError(page, 'login-error')).toHaveText('요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.');
   expect(await auditActions()).toContain('auth.login.rate_limited');
 });
 
