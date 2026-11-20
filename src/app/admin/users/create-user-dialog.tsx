@@ -89,7 +89,7 @@ export function CreateUserDialog() {
             </Select>
           </div>
           {error ? (
-            <Alert variant="destructive" role="alert">
+            <Alert variant="destructive" role="alert" data-testid="form-error">
               <AlertDescription>{error.message}</AlertDescription>
             </Alert>
           ) : null}

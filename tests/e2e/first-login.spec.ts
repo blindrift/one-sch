@@ -1,4 +1,4 @@
-import { auditActions, COOKIE, expect, login, NEW_PASSWORD, resetAndSeed, test } from './fixtures';
+import { COOKIE, NEW_PASSWORD, auditActions, expect, gotoReady, login, resetAndSeed, test } from './fixtures';
 
 test.beforeAll(resetAndSeed);
 
@@ -8,7 +8,7 @@ test('admin/admin 첫 로그인 → 변경 강제 → 변경 후 정상 → 로�
 
   // 변경 전에는 다른 화면으로 가도 되돌아온다
   for (const path of ['/timeline', '/admin/users']) {
-    await page.goto(path);
+    await gotoReady(page, path);
     await expect(page).toHaveURL(/\/change-password$/);
   }
 
@@ -27,7 +27,7 @@ test('admin/admin 첫 로그인 → 변경 강제 → 변경 후 정상 → 로�
   await page.getByRole('button', { name: '변경' }).click();
   await expect(page).toHaveURL(/\/timeline$/);
   await expect(page.getByRole('heading', { name: '전체 타임라인' })).toBeVisible();
-  await page.goto('/admin/users');
+  await gotoReady(page, '/admin/users');
   await expect(page.getByRole('heading', { name: '사용자 관리' })).toBeVisible();
 
   // 로그아웃 후 이전 쿠키를 다시 넣어도 들어갈 수 없다
