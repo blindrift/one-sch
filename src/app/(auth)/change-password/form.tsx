@@ -45,7 +45,7 @@ export function ChangePasswordForm() {
         </div>
       ))}
       {state && !state.ok ? (
-        <Alert variant="destructive" role="alert" data-testid="form-error">
+        <Alert variant="destructive" role="alert" data-testid="change-password-error">
           <AlertDescription>{state.message}</AlertDescription>
         </Alert>
       ) : null}

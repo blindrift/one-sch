@@ -34,7 +34,7 @@ test('로그인 화면에서 CSP 위반이 없다', async ({ page }) => {
   await page.getByLabel('아이디').fill('x');
   await page.getByLabel('비밀번호').fill('y');
   await page.getByRole('button', { name: '로그인', exact: true }).click();
-  await expect(formError(page)).toBeVisible();
+  await expect(formError(page, 'login-error')).toBeVisible();
   expect(violations).toEqual([]);
 });
 

@@ -22,7 +22,7 @@ export function LoginForm({ callbackUrl }: { callbackUrl: string }) {
         <Input id="password" name="password" type="password" autoComplete="current-password" required maxLength={128} />
       </div>
       {state && !state.ok ? (
-        <Alert variant="destructive" role="alert" data-testid="form-error">
+        <Alert variant="destructive" role="alert" data-testid="login-error">
           <AlertDescription>{state.message}</AlertDescription>
         </Alert>
       ) : null}
