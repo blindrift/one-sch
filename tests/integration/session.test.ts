@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '@/server/db';
 import {
   createSession,
@@ -90,14 +90,13 @@ describe('session', () => {
     const google = await makeUser({ email: 'g@example.com' });
     const l = await createSession(prisma, { userId: local.id });
     const g = await createSession(prisma, { userId: google.id });
-    const saved = process.env.LOCAL_LOGIN_ENABLED;
+    vi.stubEnv('LOCAL_LOGIN_ENABLED', 'false');
     try {
-      process.env.LOCAL_LOGIN_ENABLED = 'false';
       expect(await loadSession(l.rawToken)).toBeNull();
       expect(await prisma.session.count({ where: { userId: local.id } })).toBe(0);
       expect((await loadSession(g.rawToken))?.user.id).toBe(google.id);
     } finally {
-      process.env.LOCAL_LOGIN_ENABLED = saved;
+      vi.unstubAllEnvs();
     }
   });
 

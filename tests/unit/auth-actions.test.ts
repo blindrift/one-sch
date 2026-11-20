@@ -25,18 +25,16 @@ async function digestOf(p: Promise<unknown>) {
   }
 }
 
-const savedEnv = { LOCAL_LOGIN_ENABLED: process.env.LOCAL_LOGIN_ENABLED, AUTH_URL: process.env.AUTH_URL };
 
 beforeEach(() => {
-  process.env.LOCAL_LOGIN_ENABLED = 'true';
-  process.env.AUTH_URL = 'http://localhost:3000';
+  vi.stubEnv('LOCAL_LOGIN_ENABLED', 'true');
+  vi.stubEnv('AUTH_URL', 'http://localhost:3000');
   jar.get.mockReset();
   jar.set.mockReset();
   service.passwordLogin.mockReset();
 });
 afterEach(() => {
-  process.env.LOCAL_LOGIN_ENABLED = savedEnv.LOCAL_LOGIN_ENABLED;
-  process.env.AUTH_URL = savedEnv.AUTH_URL;
+  vi.unstubAllEnvs();
 });
 
 describe('loginWithPassword', () => {
@@ -62,7 +60,7 @@ describe('loginWithPassword', () => {
   });
 
   it('https 면 __Secure- 쿠키에 Secure', async () => {
-    process.env.AUTH_URL = 'https://sch.example.com';
+    vi.stubEnv('AUTH_URL', 'https://sch.example.com');
     service.passwordLogin.mockResolvedValue({ ok: true, rawToken: 't', expires: new Date(), mustChangePassword: false });
     await digestOf(loginWithPassword(null, form({ username: 'admin', password: 'pw' })));
     expect(jar.set.mock.calls[0][0]).toBe('__Secure-authjs.session-token');
@@ -94,7 +92,7 @@ describe('loginWithPassword', () => {
   });
 
   it('로컬 로그인이 꺼져 있으면 서비스를 부르지 않는다', async () => {
-    process.env.LOCAL_LOGIN_ENABLED = 'false';
+    vi.stubEnv('LOCAL_LOGIN_ENABLED', 'false');
     expect(await loginWithPassword(null, form({ username: 'admin', password: 'admin' }))).toMatchObject({ ok: false, code: 'FORBIDDEN' });
     expect(service.passwordLogin).not.toHaveBeenCalled();
   });

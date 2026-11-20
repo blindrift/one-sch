@@ -1,10 +1,9 @@
 import { NextRequest } from 'next/server';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { config, middleware } from '@/middleware';
 
-const saved = process.env.AUTH_URL;
 afterEach(() => {
-  process.env.AUTH_URL = saved;
+  vi.unstubAllEnvs();
 });
 
 function req(path: string, init: { method?: string; cookie?: string } = {}) {
@@ -15,7 +14,7 @@ function req(path: string, init: { method?: string; cookie?: string } = {}) {
 
 describe('middleware', () => {
   it('쿠키 없이 보호 경로 → 307 /login?callbackUrl=<경로+쿼리>', () => {
-    process.env.AUTH_URL = 'http://localhost:3000';
+    vi.stubEnv('AUTH_URL', 'http://localhost:3000');
     const res = middleware(req('/timeline?x=1&y=%2F'));
     expect(res.status).toBe(307);
     expect(res.headers.get('location')).toBe('http://localhost:3000/login?callbackUrl=%2Ftimeline%3Fx%3D1%26y%3D%252F');
@@ -42,7 +41,7 @@ describe('middleware', () => {
   });
 
   it('GET 페이지 요청만 쿠키 만료를 연장한다(POST·/api/ 제외)', () => {
-    process.env.AUTH_URL = 'http://localhost:3000';
+    vi.stubEnv('AUTH_URL', 'http://localhost:3000');
     const cookie = 'authjs.session-token=abc';
     const get = middleware(req('/timeline', { cookie }));
     const setCookie = get.headers.get('set-cookie') ?? '';
@@ -58,7 +57,7 @@ describe('middleware', () => {
   });
 
   it('https 면 __Secure- 쿠키와 HSTS·upgrade-insecure-requests', () => {
-    process.env.AUTH_URL = 'https://sch.example.com';
+    vi.stubEnv('AUTH_URL', 'https://sch.example.com');
     const res = middleware(req('/timeline', { cookie: '__Secure-authjs.session-token=abc' }));
     expect(res.status).toBe(200);
     expect(res.headers.get('strict-transport-security')).toBe('max-age=31536000; includeSubDomains');
