@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const guard = vi.hoisted(() => ({
   checkIpRate: vi.fn(),
   reserveAttempt: vi.fn(),
-  lockUser: vi.fn(async () => new Date()),
+  lockUser: vi.fn(),
   markAttemptSuccess: vi.fn(),
 }));
 const writeAudit = vi.hoisted(() => vi.fn(async () => {}));
@@ -44,17 +44,26 @@ describe('passwordLogin 감사 분기', () => {
     expect(actions()).toEqual(['auth.login.rate_limited']);
   });
 
-  it('초과 예약(n>5)도 잠그고 auth.lock 을 남기되, 5번째 실패와 겹치면 잠금 감사는 1회', async () => {
+  it('초과 예약(n>5)도 잠그고, 실제로 잠갔을 때만 auth.lock(이미 잠겨 있으면 기록 없음)', async () => {
     guard.checkIpRate.mockResolvedValue({ ok: true, attemptId: 1n });
     guard.reserveAttempt.mockResolvedValueOnce(6);
+    guard.lockUser.mockResolvedValueOnce(new Date());
     await passwordLogin({ username: 'admin', password: 'x', meta });
     expect(guard.lockUser).toHaveBeenCalledTimes(1);
     expect(actions()).toEqual(['auth.lock', 'auth.login.locked']);
 
+    // 5번째 실패가 뒤늦게 잠그려 하지만 DB 는 이미 잠김(lockUser → null): 잠금 감사는 그대로 1회
     guard.reserveAttempt.mockResolvedValueOnce(5);
+    guard.lockUser.mockResolvedValueOnce(null);
     await passwordLogin({ username: 'admin', password: 'wrong', meta });
     expect(guard.lockUser).toHaveBeenCalledTimes(2);
     expect(actions().filter((a) => a === 'auth.lock')).toHaveLength(1);
+
+    // 잠금이 풀린 뒤 다시 잠그면(lockUser → 시각) 다시 기록된다(메모리 창에 막히지 않음)
+    guard.reserveAttempt.mockResolvedValueOnce(5);
+    guard.lockUser.mockResolvedValueOnce(new Date());
+    await passwordLogin({ username: 'admin', password: 'wrong', meta });
+    expect(actions().filter((a) => a === 'auth.lock')).toHaveLength(2);
   });
 
   it('잠금 중(null)이면 잠금을 다시 걸지 않고 locked 만', async () => {

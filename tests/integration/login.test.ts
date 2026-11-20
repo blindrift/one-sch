@@ -62,8 +62,10 @@ describe('reserveAttempt·lockUser', () => {
     const u = await makeAdmin();
     const now = new Date('2026-01-01T00:00:00Z');
     for (let i = 1; i <= 5; i++) expect(await reserveAttempt(u.id, now)).toBe(i);
-    const lockedUntil = await lockUser(u.id, now);
+    const lockedUntil = (await lockUser(u.id, now))!;
     expect(lockedUntil.getTime()).toBe(now.getTime() + 15 * 60 * 1000);
+    // 이미 잠겨 있으면 다시 잠그지 않고 null(잠금 시각도 그대로)
+    expect(await lockUser(u.id, new Date(now.getTime() + 1000))).toBeNull();
     const after = await prisma.user.findUniqueOrThrow({ where: { id: u.id } });
     expect(after.failedLogins).toBe(0);
     // 시간대와 무관하게 절대 시각이 그대로 저장된다(TST-7)
@@ -124,6 +126,18 @@ describe('passwordLogin', () => {
     expect(await prisma.auditLog.count({ where: { action: 'auth.login.locked' } })).toBe(1);
     const later = new Date(t0.getTime() + 15 * 60 * 1000 + 1);
     expect((await passwordLogin({ username: 'admin', password: 'admin', meta: meta(), now: later })).ok).toBe(true);
+  });
+
+  it('관리자가 잠금을 풀었다가 다시 잠기면 auth.lock 을 다시 남긴다(H4)', async () => {
+    const u = await makeAdmin();
+    const t0 = new Date();
+    for (let i = 0; i < 5; i++) await passwordLogin({ username: 'admin', password: 'wrong', meta: meta(), now: t0 });
+    expect(await prisma.auditLog.count({ where: { action: 'auth.lock', entityId: u.id } })).toBe(1);
+    // 잠금 해제(관리자 unlock 과 같은 효과) 직후 — 15분이 지나지 않은 시점에 다시 5회 실패
+    await prisma.user.update({ where: { id: u.id }, data: { failedLogins: 0, lockedUntil: null } });
+    const t1 = new Date(t0.getTime() + 60_000);
+    for (let i = 0; i < 5; i++) await passwordLogin({ username: 'admin', password: 'wrong', meta: meta(), now: t1 });
+    expect(await prisma.auditLog.count({ where: { action: 'auth.lock', entityId: u.id } })).toBe(2);
   });
 
   it('IP 한도 초과는 rate_limited', async () => {

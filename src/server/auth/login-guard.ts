@@ -68,14 +68,19 @@ export async function reserveAttempt(userId: string, now = new Date()): Promise<
   return rows[0]?.failedLogins ?? null;
 }
 
-/** 15분 잠그고 카운터를 0 으로. */
-export async function lockUser(userId: string, now = new Date()): Promise<Date> {
+/**
+ * 15분 잠그고 카운터를 0 으로. **지금 잠겨 있지 않을 때만** 잠그며, 이번 호출이 실제로 잠갔으면 잠금 해제 시각,
+ * 이미 잠겨 있었으면 null. 동시 폭주로 여러 요청이 잠그려 해도 하나만 성공하므로 잠금 감사가 정확히 한 번 남는다.
+ */
+export async function lockUser(userId: string, now = new Date()): Promise<Date | null> {
   const lockedUntil = new Date(now.getTime() + LOCK_MS);
-  await prisma.$executeRaw`
+  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
     UPDATE "User"
     SET "lockedUntil" = ${lockedUntil}::timestamptz, "failedLogins" = 0, "updatedAt" = ${now}::timestamptz
-    WHERE "id" = ${userId}::uuid`;
-  return lockedUntil;
+    WHERE "id" = ${userId}::uuid
+      AND ("lockedUntil" IS NULL OR "lockedUntil" <= ${now}::timestamptz)
+    RETURNING "id"`;
+  return rows.length ? lockedUntil : null;
 }
 
 /** 예약 결과로 이번 시도를 검증해도 되는지. 아니면(잠김·초과) 검증 없이 실패 처리한다. */
