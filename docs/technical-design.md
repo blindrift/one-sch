@@ -474,13 +474,17 @@ export async function updateTask(input: unknown): Promise<ActionResult<TaskDto>>
 4. compose 기동: `migrate` 서비스가 `prisma migrate deploy` → 시드(사용자 없을 때만 admin 생성) 후 종료, 이어서 `app` 시작. **이 시점에는 리버스 프록시를 아직 만들지 않는다**(app 은 `127.0.0.1:3000` 에만 열려 외부에서 닿지 않는다)
 5. **프록시 공개 전 초기 계정 정리(SSH 터널)** — 기본 계정 admin/admin 이 인터넷에 노출되는 구간을 없앤다.
    1. 개발 PC 에서 `ssh -L 3000:127.0.0.1:3000 <NAS 관리자>@<NAS 주소>` 로 터널을 연다
-   2. 브라우저로 `http://localhost:3000/login` → `admin` / `admin` 로그인 → 비밀번호 변경(12자 이상)
+   2. **Chrome** 으로 `http://localhost:3000/login` → `admin` / `admin` 로그인 → 비밀번호 변경(12자 이상).
+      `AUTH_URL` 이 https 이므로 앱은 `__Secure-` 쿠키(Secure)·`upgrade-insecure-requests` 를 쓴다. Chrome 은 `http://localhost` 를
+      안전한 출처로 취급해 이 쿠키를 받아들이지만, 다른 브라우저(특히 Safari)는 거부하거나 폼 전송을 https 로 바꿔 실패할 수 있다.
+      **(미확인) Docker 검증 때 실제 https `AUTH_URL` 로 이 단계를 실측**하고, 실패하면 이 절차를 고친다
    3. `/admin/users` 에서 운영자 구글 계정을 **ADMIN** 으로 등록
    4. (권장) `.env` 의 `LOCAL_LOGIN_ENABLED=false` 로 바꾸고 app 재생성 — 로컬 admin 의 남은 세션도 즉시 끊긴다
    5. 터널에서는 `AUTH_URL`(공개 https 도메인)과 주소가 달라 구글 로그인은 아직 쓰지 않는다
 6. DSM 제어판 > 로그인 포털 > 리버스 프록시: `https://<도메인>:443 → http://127.0.0.1:3000`, HSTS 사용, 인증서는 Let's Encrypt.
    **사용자 지정 머리글**에 `X-Real-IP` = `$remote_addr` 를 추가한다(프록시가 이 헤더를 덮어쓰므로 클라이언트가 위조할 수 없다)
 7. 클라이언트 IP 실측: 외부(휴대폰 LTE 등)에서 틀린 비밀번호로 한 번 로그인 → `/admin/users` 가 아니라 DB 감사 로그(`AuditLog.ip`) 또는 app 로그에서 그 외부 IP 가 찍히는지 확인. `unknown` 이거나 공유기·게이트웨이 주소면 6 의 머리글 설정을 다시 본다(app 로그 `request_meta.client_ip_missing` 경고도 같은 신호)
+   - 위조 확인: 외부에서 `curl -s -o /dev/null -X POST -H 'X-Real-IP: 1.2.3.4' https://<도메인>/login` 처럼 헤더를 꾸며 보낸 뒤(또는 개발자 도구로 같은 헤더를 붙여 틀린 로그인) 감사 로그·app 로그의 IP 가 **실제 외부 IP** 인지 본다. `1.2.3.4` 가 찍히면 프록시가 헤더를 덮어쓰지 않는 것이므로 6 의 설정 오류다
 8. Google Cloud 콘솔에서 OAuth 클라이언트 생성, 승인된 리디렉션 URI `https://<도메인>/api/auth/callback/google`
 9. 등록한 구글 ADMIN 계정으로 로그인 확인
 

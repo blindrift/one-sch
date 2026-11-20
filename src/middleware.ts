@@ -5,7 +5,8 @@ import { SESSION_IDLE_SECONDS, isHttps, sessionCookie } from '@/server/auth/cook
 // DB 를 보지 않는다. 세션 유효성·역할·비밀번호 강제 변경은 각 page·action 의 requirePage/requireRole 이 판단한다.
 // 여기서는 CSP nonce·보안 헤더, 쿠키가 없을 때의 로그인 화면 이동(UX), 쿠키 만료 연장만 한다.
 
-// /robots.txt 처럼 public/ 의 정적 파일도 로그인 없이 열어 둔다.
+// /robots.txt 처럼 public/ 의 정적 파일도 로그인 없이 열어 둔다. public/ 에 파일을 추가하면 여기에도 추가한다
+// (아니면 비로그인 요청이 /login 으로 리디렉션된다).
 const PUBLIC_PREFIXES = ['/login', '/api/auth', '/api/health', '/robots.txt'];
 
 function isPublic(pathname: string): boolean {
