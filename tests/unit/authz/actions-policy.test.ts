@@ -71,7 +71,6 @@ function expectedCode(policy: { min: Role; allowPasswordChange?: boolean }, u: S
   return 'VALIDATION';
 }
 
-const savedLocalLogin = process.env.LOCAL_LOGIN_ENABLED;
 
 beforeEach(() => {
   state.user = null;
@@ -80,7 +79,7 @@ beforeEach(() => {
   authjs.signOut.mockClear();
 });
 afterEach(() => {
-  process.env.LOCAL_LOGIN_ENABLED = savedLocalLogin;
+  vi.unstubAllEnvs();
 });
 
 describe('Server Action 권한 정책', () => {
@@ -118,7 +117,7 @@ describe('PUBLIC 액션도 무세션에서 DB 를 먼저 건드리지 않는다'
   const byKey = new Map(actions);
 
   it('loginWithPassword: 로컬 로그인이 꺼져 있으면 FORBIDDEN, DB 접근 0', async () => {
-    process.env.LOCAL_LOGIN_ENABLED = 'false';
+    vi.stubEnv('LOCAL_LOGIN_ENABLED', 'false');
     const fd = new FormData();
     fd.set('username', 'admin');
     fd.set('password', 'admin');
@@ -128,7 +127,7 @@ describe('PUBLIC 액션도 무세션에서 DB 를 먼저 건드리지 않는다'
   });
 
   it('loginWithPassword: 빈 입력은 DB 접근 없이 실패', async () => {
-    process.env.LOCAL_LOGIN_ENABLED = 'true';
+    vi.stubEnv('LOCAL_LOGIN_ENABLED', 'true');
     const r = await byKey.get('auth.loginWithPassword')!(null, new FormData());
     expect(r).toMatchObject({ ok: false, code: 'UNAUTHENTICATED' });
     expect(state.dbAccess).toEqual([]);

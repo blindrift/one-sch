@@ -5,9 +5,8 @@ vi.mock('next/headers', () => ({ headers: async () => h.headers }));
 
 const { clientIpHeaderName, getRequestMeta, parseClientIp, truncateUserAgent } = await import('@/server/request-meta');
 
-const saved = process.env.CLIENT_IP_HEADER;
 afterEach(() => {
-  process.env.CLIENT_IP_HEADER = saved;
+  vi.unstubAllEnvs();
 });
 
 describe('parseClientIp', () => {
@@ -25,16 +24,16 @@ describe('parseClientIp', () => {
 
 describe('clientIpHeaderName', () => {
   it('기본은 x-real-ip, CLIENT_IP_HEADER 로 바꿀 수 있고 소문자로', () => {
-    delete process.env.CLIENT_IP_HEADER;
+    vi.stubEnv('CLIENT_IP_HEADER', undefined);
     expect(clientIpHeaderName()).toBe('x-real-ip');
-    process.env.CLIENT_IP_HEADER = 'X-Client-IP';
+    vi.stubEnv('CLIENT_IP_HEADER', 'X-Client-IP');
     expect(clientIpHeaderName()).toBe('x-client-ip');
   });
 });
 
 describe('getRequestMeta', () => {
   beforeEach(() => {
-    delete process.env.CLIENT_IP_HEADER;
+    vi.stubEnv('CLIENT_IP_HEADER', undefined);
   });
 
   it('설정한 헤더만 쓰고 X-Forwarded-For 는 무시한다', async () => {

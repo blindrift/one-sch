@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const cookie = vi.hoisted(() => ({ value: undefined as string | undefined }));
 const loadSession = vi.hoisted(() => vi.fn());
@@ -21,8 +21,12 @@ const baseUser = {
 };
 
 beforeEach(() => {
-  process.env.AUTH_URL = 'http://localhost:3000';
+  vi.stubEnv('AUTH_URL', 'http://localhost:3000');
   loadSession.mockReset();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe('getSessionUser', () => {

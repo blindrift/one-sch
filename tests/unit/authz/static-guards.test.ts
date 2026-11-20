@@ -96,8 +96,7 @@ function resolveSpecifier(spec: string, fromFile: string): { module: string; fil
   if (!base) return { module: spec, file: null };
   const candidates = [base, ...RESOLVE_EXTS.map((e) => base + e), ...RESOLVE_EXTS.map((e) => join(base!, 'index' + e))];
   const found = candidates.find((c) => existsSync(c) && statSync(c).isFile()) ?? null;
-  const module = rel(found ?? base).replace(CODE_EXT, '').replace(/\/index$/, '');
-  return { module, file: found };
+  return { module: rel(found ?? base).replace(CODE_EXT, '').replace(/\/index$/, ''), file: found };
 }
 
 type ImportRecord = {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // NextAuth 에 넘기는 설정을 가로채 연결이 맞는지 본다(구글 실제 로그인은 수동 확인 대상).
 type Captured = {
@@ -31,9 +31,13 @@ vi.mock('@/server/db', () => ({ prisma: db }));
 vi.mock('@/server/audit', () => ({ writeAudit }));
 vi.mock('@/server/request-meta', () => ({ getRequestMeta: async () => ({ ip: '203.0.113.1', userAgent: 'ua' }) }));
 
-process.env.AUTH_URL = 'https://sch.example.com';
+vi.stubEnv('AUTH_URL', 'https://sch.example.com');
 await import('@/server/auth/config');
 const c = () => cap.config;
+
+afterAll(() => {
+  vi.unstubAllEnvs();
+});
 
 beforeEach(() => {
   db.user.findUnique.mockReset();
