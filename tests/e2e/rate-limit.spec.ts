@@ -13,7 +13,7 @@ test('같은 IP 에서 1분에 10회를 넘으면 11번째는 RATE_LIMITED', asy
 });
 
 test('다른 IP 는 영향을 받지 않는다', async ({ page }) => {
-  // fixtures 가 테스트마다 다른 X-Forwarded-For 를 준다
+  // fixtures 가 테스트마다 다른 X-Real-IP 를 준다
   await login(page, 'admin', 'admin');
   await expect(page).toHaveURL(/\/change-password$/);
 });
