@@ -1,11 +1,8 @@
 import type { NextConfig } from 'next';
 
-const https = (process.env.AUTH_URL ?? '').startsWith('https://');
-
-const staticHeaders = [
-  { key: 'X-Content-Type-Options', value: 'nosniff' },
-  ...(https ? [{ key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' }] : []),
-];
+// headers() 는 빌드 때 평가되므로 런타임 값(AUTH_URL)에 따른 헤더(HSTS)는 여기 두지 않는다.
+// HSTS 는 middleware(https 일 때)와 DSM 리버스 프록시가 붙인다.
+const staticHeaders = [{ key: 'X-Content-Type-Options', value: 'nosniff' }];
 
 const nextConfig: NextConfig = {
   output: 'standalone',
@@ -24,6 +21,7 @@ const nextConfig: NextConfig = {
     return [
       { source: '/_next/static/:path*', headers: staticHeaders },
       { source: '/favicon.ico', headers: staticHeaders },
+      { source: '/robots.txt', headers: staticHeaders },
     ];
   },
 };
