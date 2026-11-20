@@ -13,6 +13,8 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    // next.config 의 experimental.authInterrupts 를 켜면 Next 빌드가 주입하는 값(forbidden() 사용 조건)
+    env: { __NEXT_EXPERIMENTAL_AUTH_INTERRUPTS: 'true' },
     projects: [
       {
         extends: true,
