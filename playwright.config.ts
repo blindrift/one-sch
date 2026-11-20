@@ -8,7 +8,13 @@ if (existsSync('.env.local')) process.loadEnvFile('.env.local');
 const toE2e = (url: string | undefined) => url?.replace(/\/onesch_test(?=\?|$)/, '/onesch_e2e');
 for (const key of ['TEST_DATABASE_URL', 'TEST_MIGRATE_DATABASE_URL', 'TEST_ADMIN_DATABASE_URL'] as const) {
   const url = process.env[key];
-  if (url && !url.includes('/onesch_e2e')) process.env[key] = toE2e(url);
+  if (!url) throw new Error(`${key} 가 필요합니다(.env.local).`);
+  const e2e = url.includes('/onesch_e2e') ? url : toE2e(url);
+  // 치환이 안 되면(DB 이름이 onesch_test 가 아님) 통합 테스트 DB 를 E2E 가 지우게 되므로 멈춘다.
+  if (!e2e || new URL(e2e).pathname !== '/onesch_e2e') {
+    throw new Error(`${key} 를 onesch_e2e 로 바꾸지 못했습니다: DB 이름이 onesch_test 여야 합니다.`);
+  }
+  process.env[key] = e2e;
 }
 
 const PORT = 3100;
