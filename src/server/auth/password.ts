@@ -1,8 +1,8 @@
 // 시드(prisma/seed.ts, migrate 이미지)에서도 쓰므로 'server-only' 와 '@/' 경로를 import 하지 않는다.
 import { hash, verify } from '@node-rs/argon2';
+import { PASSWORD_MAX, PASSWORD_MIN } from '../../lib/validation/limits';
 
-export const PASSWORD_MIN = 12;
-export const PASSWORD_MAX = 128;
+export { PASSWORD_MAX, PASSWORD_MIN };
 
 // OWASP 권장 argon2id 최소값(19 MiB, t=2, p=1). Algorithm.Argon2id = 2 (const enum 이라 값으로 쓴다).
 const ARGON2_OPTIONS = { algorithm: 2, memoryCost: 19456, timeCost: 2, parallelism: 1 } as const;
