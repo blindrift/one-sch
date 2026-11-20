@@ -30,12 +30,14 @@ export class AppError extends Error {
   readonly code: ErrorCode;
   /** 내부 사유(로그·분기용). 사용자에게는 message 만 보인다. */
   readonly reason?: string;
+  readonly fieldErrors?: Record<string, string[]>;
 
-  constructor(code: ErrorCode, reason?: string, message?: string) {
+  constructor(code: ErrorCode, reason?: string, message?: string, fieldErrors?: Record<string, string[]>) {
     super(message ?? MESSAGES[code]);
     this.name = 'AppError';
     this.code = code;
     this.reason = reason;
+    this.fieldErrors = fieldErrors;
   }
 }
 
@@ -52,7 +54,11 @@ export async function toActionResult<T>(fn: () => Promise<T>): Promise<ActionRes
     return { ok: true, data: await fn() };
   } catch (err) {
     unstable_rethrow(err);
-    if (err instanceof AppError) return { ok: false, code: err.code, message: err.message };
+    if (err instanceof AppError) {
+      return err.fieldErrors
+        ? { ok: false, code: err.code, message: err.message, fieldErrors: err.fieldErrors }
+        : { ok: false, code: err.code, message: err.message };
+    }
     if (err instanceof ZodError) {
       const fieldErrors: Record<string, string[]> = {};
       for (const issue of err.issues) {
