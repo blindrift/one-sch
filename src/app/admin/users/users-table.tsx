@@ -83,7 +83,8 @@ export function UsersTable({ users, currentUserId }: { users: UserRow[]; current
                 <TableCell>
                   <Select
                     value={u.role}
-                    disabled={pending}
+                    // 자기 역할은 서버에서도 거부한다(바꾸면 즉시 로그아웃되므로 다른 관리자가 하게).
+                    disabled={pending || isMe}
                     onValueChange={(role) => run(() => updateUserRole({ userId: u.id, role: role as Role }))}
                   >
                     <SelectTrigger size="sm" aria-label={`${u.name} 역할`}>
