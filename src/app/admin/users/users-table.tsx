@@ -53,7 +53,7 @@ export function UsersTable({ users, currentUserId }: { users: UserRow[]; current
   return (
     <div className="flex flex-col gap-3">
       {message ? (
-        <Alert variant="destructive" role="alert">
+        <Alert variant="destructive" role="alert" data-testid="form-error">
           <AlertDescription>{message}</AlertDescription>
         </Alert>
       ) : null}

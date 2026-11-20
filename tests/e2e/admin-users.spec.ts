@@ -1,4 +1,4 @@
-import { auditActions, expect, injectSession, login, ownerDb, resetAndSeed, test } from './fixtures';
+import { auditActions, expect, gotoReady, injectSession, login, ownerDb, resetAndSeed, test } from './fixtures';
 
 test.beforeAll(resetAndSeed);
 
@@ -10,7 +10,7 @@ test('사용자 등록 → 역할 변경(대상 세션 무효) → 비활성화 
   // 구글 계정 ADMIN 으로 로그인한 상태를 만든다(구글 로그인은 E2E 대상 아님).
   const operator = await ownerDb.user.create({ data: { email: 'ops@example.com', name: '운영자', role: 'ADMIN' } });
   await injectSession(context, operator.id);
-  await page.goto('/admin/users');
+  await gotoReady(page, '/admin/users');
   await expect(page.getByRole('heading', { name: '사용자 관리' })).toBeVisible();
 
   // 1. 등록
@@ -47,6 +47,7 @@ test('사용자 등록 → 역할 변경(대상 세션 무효) → 비활성화 
     data: { failedLogins: 0, lockedUntil: new Date(Date.now() + 10 * 60 * 1000) },
   });
   await page.reload();
+  await page.locator('html[data-hydrated="true"]').waitFor();
   await expect(row.getByText('잠김')).toBeVisible();
   await row.getByRole('button', { name: '김멤버 작업' }).click();
   await page.getByRole('menuitem', { name: '잠금 해제' }).click();
@@ -79,19 +80,20 @@ test('사용자 등록 → 역할 변경(대상 세션 무효) → 비활성화 
   );
 });
 
-test('마지막 활성 관리자와 자기 자신은 비활성화 메뉴가 없거나 거부된다', async ({ page, context }) => {
+test('유일한 활성 관리자는 자기 역할·활성 상태를 바꿀 수 없다(TST-14)', async ({ page, context }) => {
   await resetAndSeed();
   const operator = await ownerDb.user.create({ data: { email: 'solo@example.com', name: '단독', role: 'ADMIN' } });
+  // 로컬 admin 을 비활성화해 활성 ADMIN 이 operator 하나뿐인 상태를 만든다.
   await ownerDb.user.update({ where: { username: 'admin' }, data: { active: false } });
   await injectSession(context, operator.id);
-  await page.goto('/admin/users');
+  await gotoReady(page, '/admin/users');
   const row = page.getByTestId('user-row-solo@example.com');
+  // 자기 역할 선택은 비활성(서버도 CONFLICT self 로 거부 — 통합 테스트)
+  await expect(row.getByRole('combobox', { name: '단독 역할' })).toBeDisabled();
   await row.getByRole('button', { name: '단독 작업' }).click();
   await expect(page.getByRole('menuitem', { name: '비활성화' })).toHaveCount(0);
   await page.keyboard.press('Escape');
-  // 마지막 활성 ADMIN 강등 시도 → 거부 메시지
-  await row.getByRole('combobox', { name: '단독 역할' }).click();
-  await page.getByRole('option', { name: '조회자' }).click();
-  await expect(page.getByRole('alert')).toHaveText('마지막 활성 관리자의 역할은 바꿀 수 없습니다.');
-  expect((await ownerDb.user.findUniqueOrThrow({ where: { id: operator.id } })).role).toBe('ADMIN');
+  const me = await ownerDb.user.findUniqueOrThrow({ where: { id: operator.id } });
+  expect(me).toMatchObject({ role: 'ADMIN', active: true });
+  expect(await ownerDb.user.count({ where: { role: 'ADMIN', active: true } })).toBe(1);
 });

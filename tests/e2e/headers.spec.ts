@@ -1,4 +1,4 @@
-import { expect, test } from './fixtures';
+import { collectCspViolations, expect, formError, gotoReady, injectSession, ownerDb, resetAndSeed, test } from './fixtures';
 
 test('CSP nonce 는 요청마다 다르고 script 태그 nonce 와 같다', async ({ request }) => {
   const nonces: string[] = [];
@@ -24,17 +24,28 @@ test('CSP nonce 는 요청마다 다르고 script 태그 nonce 와 같다', asyn
   expect(nonces[0]).not.toBe(nonces[1]);
 });
 
+test.beforeAll(resetAndSeed);
+
 test('로그인 화면에서 CSP 위반이 없다', async ({ page }) => {
-  const violations: string[] = [];
-  page.on('console', (msg) => {
-    if (/Content Security Policy|Refused to/i.test(msg.text())) violations.push(msg.text());
-  });
-  await page.goto('/login');
+  const violations = collectCspViolations(page);
+  await gotoReady(page, '/login');
   await expect(page.getByLabel('아이디')).toBeVisible();
   // 하이드레이션이 끝나 폼이 동작하는지(스크립트가 실행됐는지)
   await page.getByLabel('아이디').fill('x');
   await page.getByLabel('비밀번호').fill('y');
   await page.getByRole('button', { name: '로그인', exact: true }).click();
-  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(formError(page)).toBeVisible();
+  expect(violations).toEqual([]);
+});
+
+test('로그인한 상태의 화면(관리·타임라인)에서도 CSP 위반이 없다', async ({ page, context }) => {
+  const admin = await ownerDb.user.create({ data: { email: 'csp@example.com', name: 'csp', role: 'ADMIN' } });
+  await injectSession(context, admin.id);
+  const violations = collectCspViolations(page);
+  for (const path of ['/timeline', '/admin/users']) {
+    await gotoReady(page, path);
+  }
+  await page.getByRole('button', { name: '사용자 등록' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
   expect(violations).toEqual([]);
 });
