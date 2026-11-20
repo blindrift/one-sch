@@ -9,7 +9,7 @@ vi.mock('@/server/audit', () => ({ writeAudit }));
 vi.mock('@/server/db', () => ({ prisma: {} }));
 vi.mock('@/server/request-meta', () => ({ getRequestMeta: async () => ({ ip: '1.2.3.4', userAgent: null }) }));
 
-const { requireApi, requirePage, requireRole, PASSWORD_CHANGE_REQUIRED } = await import('@/server/auth/require-role');
+const { withApi, requirePage, requireRole, PASSWORD_CHANGE_REQUIRED } = await import('@/server/auth/require-role');
 const { AppError } = await import('@/server/action-result');
 const { resetAuditThrottle } = await import('@/server/audit-throttle');
 
@@ -127,25 +127,58 @@ describe('requirePage', () => {
   });
 });
 
-describe('requireApi', () => {
-  it('세션 없음 → 401 JSON', async () => {
-    const r = await requireApi('VIEWER');
-    expect(r).toBeInstanceOf(Response);
-    const res = r as Response;
+describe('withApi', () => {
+  const handler = vi.fn(async (_req: Request, _ctx: unknown, u: { id: string }) => Response.json({ hello: u.id }));
+  const route = withApi('MEMBER', handler);
+  const call = () => route(new Request('http://localhost/api/x'), {});
+
+  beforeEach(() => {
+    handler.mockClear();
+  });
+
+  it('세션 없음 → 401 JSON(no-store), handler 미실행', async () => {
+    const res = await call();
     expect(res.status).toBe(401);
-    expect(await res.json()).toMatchObject({ ok: false, code: 'UNAUTHENTICATED' });
+    expect(await res.json()).toEqual({ ok: false, code: 'UNAUTHENTICATED', message: '로그인이 필요합니다.' });
     expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(handler).not.toHaveBeenCalled();
   });
 
-  it('권한 부족·비밀번호 변경 필요 → 403 JSON', async () => {
+  it('역할 부족 → 403, handler 미실행', async () => {
     state.user = user('VIEWER');
-    expect(((await requireApi('ADMIN')) as Response).status).toBe(403);
-    state.user = user('ADMIN', { mustChangePassword: true });
-    expect(((await requireApi('VIEWER')) as Response).status).toBe(403);
+    const res = await call();
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'FORBIDDEN' });
+    expect(handler).not.toHaveBeenCalled();
   });
 
-  it('충족하면 사용자', async () => {
+  it('비밀번호 변경 필요 → 403(ADMIN 이라도), handler 미실행', async () => {
+    state.user = user('ADMIN', { mustChangePassword: true });
+    const res = await call();
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'FORBIDDEN', message: '비밀번호를 먼저 변경해야 합니다.' });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('allowPasswordChange 옵션이면 변경 필요 상태도 통과', async () => {
+    state.user = user('ADMIN', { mustChangePassword: true });
+    const res = await withApi('VIEWER', handler, { allowPasswordChange: true })(new Request('http://localhost/'), {});
+    expect(res.status).toBe(200);
+  });
+
+  it('충족하면 사용자와 함께 handler 실행', async () => {
     state.user = user('MEMBER');
-    expect(await requireApi('MEMBER')).toMatchObject({ id: 'u1' });
+    const res = await call();
+    expect(await res.json()).toEqual({ hello: 'u1' });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0][2]).toMatchObject({ id: 'u1', role: 'MEMBER' });
+  });
+
+  it('권한 외 오류(예: DB 오류)는 응답으로 감추지 않고 그대로 던진다', async () => {
+    state.user = user('MEMBER');
+    const boom = withApi('MEMBER', async () => {
+      throw new Error('boom');
+    });
+    await expect(boom(new Request('http://localhost/'), {})).rejects.toThrow('boom');
   });
 });
