@@ -501,6 +501,9 @@ export async function updateTask(input: unknown): Promise<ActionResult<TaskDto>>
 - 앱 로그는 JSON 한 줄 형식으로 stdout (Container Manager 에서 조회), 비밀번호·토큰·쿠키 필드 마스킹
 - 로그 크기 제한: compose `logging.options.max-size=10m, max-file=3`
 - 보안 이벤트(로그인 실패·잠금·권한 거부)는 감사 로그에도 기록
+- 운영 모니터링 신호(앱 로그에서 주기적으로 확인):
+  - `login_guard.ip_rate_timeout`(code P2024)·`auth.login.rate_limited.busy` 가 반복되면 DB 연결 풀(app 은 5개)이 고갈된 상태다. 이때는 IP 와 무관하게 **모든 로컬 로그인이 RATE_LIMITED** 로 거부된다(수용 위험, 보안 재검토 I-B). 지속되면 DB 부하·느린 쿼리를 확인하고 `connection_limit` 조정을 검토한다
+  - `request_meta.client_ip_missing` 은 리버스 프록시의 X-Real-IP 설정 누락 신호(10.2 6·7단계)
 
 ### 10.5 업데이트
 - 새 이미지 가져오기 → 백업 확인 → 컨테이너 재생성(마이그레이션 자동 적용)
