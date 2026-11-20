@@ -1,11 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { appDb, ownerDb, resetDb } from '../helpers/db';
+import { appDb, disconnectAll, ownerDb, resetDb } from '../helpers/db';
 
 beforeEach(resetDb);
-afterAll(async () => {
-  await appDb.$disconnect();
-  await ownerDb.$disconnect();
-});
+afterAll(disconnectAll);
 
 async function insertAudit() {
   const row = await appDb.auditLog.create({ data: { action: 'test.audit' } });
@@ -24,7 +21,7 @@ describe('AuditLog append-only', () => {
       /permission denied/,
     );
     await expect(appDb.$executeRaw`DELETE FROM "AuditLog" WHERE "id" = ${id}`).rejects.toThrow(/permission denied/);
-    await expect(appDb.$executeRaw`TRUNCATE "AuditLog"`).rejects.toThrow(/permission denied|must be owner/);
+    await expect(appDb.$executeRaw`TRUNCATE "AuditLog"`).rejects.toThrow(/permission denied for table "?AuditLog"?/);
   });
 
   it('소유자도 UPDATE·DELETE 는 트리거가 거부한다', async () => {
@@ -34,9 +31,23 @@ describe('AuditLog append-only', () => {
     );
     await expect(ownerDb.$executeRaw`DELETE FROM "AuditLog" WHERE "id" = ${id}`).rejects.toThrow(/append-only/);
   });
+
+  it('소유자의 TRUNCATE 도 문장 트리거가 거부한다', async () => {
+    await insertAudit();
+    await expect(ownerDb.$executeRaw`TRUNCATE "AuditLog"`).rejects.toThrow(/append-only/);
+    expect(await ownerDb.auditLog.count()).toBe(1);
+  });
 });
 
 describe('앱 역할 최소 권한', () => {
+  it('_prisma_migrations 는 읽기·쓰기 모두 거부된다', async () => {
+    await expect(appDb.$queryRaw`SELECT count(*) FROM "_prisma_migrations"`).rejects.toThrow(/permission denied for table "?_prisma_migrations"?/);
+    await expect(appDb.$executeRaw`UPDATE "_prisma_migrations" SET "logs" = 'x'`).rejects.toThrow(
+      /permission denied for table "?_prisma_migrations"?/,
+    );
+    await expect(appDb.$executeRaw`DELETE FROM "_prisma_migrations"`).rejects.toThrow(/permission denied for table "?_prisma_migrations"?/);
+  });
+
   it('CREATE TABLE 은 거부된다', async () => {
     await expect(appDb.$executeRaw`CREATE TABLE "Evil" ("id" int)`).rejects.toThrow(/permission denied/);
   });

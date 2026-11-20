@@ -322,7 +322,8 @@ ALTER TABLE "TaskDependency" ADD CONSTRAINT "TaskDependency_not_self_check" CHEC
 ALTER TABLE "Issue" ADD CONSTRAINT "Issue_number_check" CHECK ("number" > 0);
 
 -- 앱 역할 권한: db-init 의 기본 권한과 같은 DML 만 명시적으로 준다(기본 권한이 없는 DB 에서도 같게).
--- AuditLog append-only: 앱 역할의 UPDATE/DELETE/TRUNCATE 를 회수하고, 소유자 포함 모든 역할의 UPDATE/DELETE 를 트리거로 거부한다.
+-- _prisma_migrations(마이그레이션 이력)는 앱이 읽거나 고칠 일이 없으므로 권한을 모두 회수한다.
+-- AuditLog 는 앱 역할의 UPDATE/DELETE/TRUNCATE 를 회수한다(append-only).
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'onesch_app') THEN
@@ -330,9 +331,15 @@ BEGIN
     GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO onesch_app;
     GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO onesch_app;
     REVOKE UPDATE, DELETE, TRUNCATE ON "AuditLog" FROM onesch_app;
+    IF to_regclass('public."_prisma_migrations"') IS NOT NULL THEN
+      REVOKE ALL ON "_prisma_migrations" FROM onesch_app;
+    END IF;
   END IF;
 END $$;
 
+-- 트리거는 소유자(onesch_owner)에게도 적용되어 실수로 고치거나 지우는 것을 막는다.
+-- 다만 소유자·superuser 는 트리거를 끄거나 지울 수 있으므로, append-only 보장 대상은 앱 역할이다.
+-- 보관 기간이 지난 행 정리는 운영 절차(설계서 10.6)로 superuser 가 한다.
 CREATE FUNCTION audit_log_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   RAISE EXCEPTION 'AuditLog is append-only';
@@ -340,3 +347,6 @@ END $$;
 
 CREATE TRIGGER audit_log_no_update_delete BEFORE UPDATE OR DELETE ON "AuditLog"
   FOR EACH ROW EXECUTE FUNCTION audit_log_immutable();
+
+CREATE TRIGGER audit_log_no_truncate BEFORE TRUNCATE ON "AuditLog"
+  FOR EACH STATEMENT EXECUTE FUNCTION audit_log_immutable();
