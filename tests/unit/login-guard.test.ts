@@ -9,12 +9,12 @@ const { checkIpRate, mayVerify, LOCK_THRESHOLD } = await import('@/server/auth/l
 const known = (code: string) => new Prisma.PrismaClientKnownRequestError('x', { code, clientVersion: '6.19.3' });
 
 describe('checkIpRate', () => {
-  it('트랜잭션 대기 초과(P2028)·연결 풀 초과(P2024)는 null(RATE_LIMITED), 대기 한도를 지정한다', async () => {
+  it('같은 IP lock 대기 초과(P2028)는 limited, 연결 풀 고갈(P2024)은 busy, 대기 한도를 지정한다', async () => {
     const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-    for (const code of ['P2028', 'P2024']) {
-      db.$transaction.mockRejectedValueOnce(known(code));
-      expect(await checkIpRate('1.2.3.4')).toBeNull();
-    }
+    db.$transaction.mockRejectedValueOnce(known('P2028'));
+    expect(await checkIpRate('1.2.3.4')).toEqual({ ok: false, reason: 'limited' });
+    db.$transaction.mockRejectedValueOnce(known('P2024'));
+    expect(await checkIpRate('1.2.3.4')).toEqual({ ok: false, reason: 'busy' });
     spy.mockRestore();
     expect(db.$transaction.mock.calls[0][1]).toEqual({ maxWait: 5000, timeout: 10000 });
   });

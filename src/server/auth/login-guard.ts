@@ -12,29 +12,32 @@ const ATTEMPT_RETENTION_MS = 24 * 60 * 60 * 1000;
 /** 같은 IP 동시 폭주로 advisory lock 대기가 길어지면 기다리지 않고 제한으로 처리한다. */
 const IP_TX_OPTIONS = { maxWait: 5_000, timeout: 10_000 } as const;
 
+export type IpRateResult = { ok: true; attemptId: bigint } | { ok: false; reason: 'limited' | 'busy' };
+
 /**
- * IP 당 60초에 10회(성공·실패 모두). 허용이면 시도 기록 id, 초과면 null.
+ * IP 당 60초에 10회(성공·실패 모두). 허용이면 시도 기록 id.
  * 같은 IP 의 동시 요청은 advisory lock 으로 줄 세워 한도를 넘지 않게 한다.
- * 트랜잭션 대기·연결 풀 시간 초과(P2028·P2024)도 null(RATE_LIMITED)로 돌려 INTERNAL 이 되지 않게 한다.
+ * - limited: 한도 초과, 또는 같은 IP 의 lock 대기 초과(P2028 — 같은 IP 폭주)
+ * - busy: 연결 풀 고갈(P2024). 이 IP 탓이 아닐 수 있고 DB 를 더 쓰면 악화되므로 호출자는 감사 기록을 하지 않는다.
  */
-export async function checkIpRate(ip: string, now = new Date(), random = Math.random): Promise<bigint | null> {
+export async function checkIpRate(ip: string, now = new Date(), random = Math.random): Promise<IpRateResult> {
   try {
     return await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`login:${ip}`}))`;
       const recent = await tx.loginAttempt.count({
         where: { ip, at: { gt: new Date(now.getTime() - IP_WINDOW_MS) } },
       });
-      if (recent >= IP_LIMIT) return null;
+      if (recent >= IP_LIMIT) return { ok: false as const, reason: 'limited' as const };
       const attempt = await tx.loginAttempt.create({ data: { ip, at: now } });
       if (random() < 0.01) {
         await tx.loginAttempt.deleteMany({ where: { at: { lt: new Date(now.getTime() - ATTEMPT_RETENTION_MS) } } });
       }
-      return attempt.id;
+      return { ok: true as const, attemptId: attempt.id };
     }, IP_TX_OPTIONS);
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && (err.code === 'P2028' || err.code === 'P2024')) {
-      log.warn('login_guard.ip_rate_timeout', { code: err.code });
-      return null;
+      log.warn('login_guard.ip_rate_timeout', { code: err.code, ip });
+      return { ok: false, reason: err.code === 'P2024' ? 'busy' : 'limited' };
     }
     throw err;
   }

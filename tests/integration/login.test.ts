@@ -36,16 +36,17 @@ afterAll(async () => {
 describe('checkIpRate', () => {
   it('60초에 10회까지, 11번째 거부, 창이 지나면 다시 허용', async () => {
     const t0 = new Date('2026-01-01T00:00:00Z');
-    for (let i = 0; i < IP_LIMIT; i++) expect(await checkIpRate('1.1.1.1', new Date(t0.getTime() + i))).not.toBeNull();
-    expect(await checkIpRate('1.1.1.1', new Date(t0.getTime() + 1000))).toBeNull();
-    expect(await checkIpRate('2.2.2.2', new Date(t0.getTime() + 1000))).not.toBeNull();
-    expect(await checkIpRate('1.1.1.1', new Date(t0.getTime() + 61_000))).not.toBeNull();
+    for (let i = 0; i < IP_LIMIT; i++) expect((await checkIpRate('1.1.1.1', new Date(t0.getTime() + i))).ok).toBe(true);
+    expect(await checkIpRate('1.1.1.1', new Date(t0.getTime() + 1000))).toEqual({ ok: false, reason: 'limited' });
+    expect((await checkIpRate('2.2.2.2', new Date(t0.getTime() + 1000))).ok).toBe(true);
+    expect((await checkIpRate('1.1.1.1', new Date(t0.getTime() + 61_000))).ok).toBe(true);
   });
 
   it('병렬 요청에서도 10회를 넘지 않는다', async () => {
     const now = new Date();
     const results = await Promise.all(Array.from({ length: 25 }, () => checkIpRate('3.3.3.3', now)));
-    expect(results.filter((r) => r !== null)).toHaveLength(IP_LIMIT);
+    expect(results.filter((r) => r.ok)).toHaveLength(IP_LIMIT);
+    expect(results.filter((r) => !r.ok).every((r) => !r.ok && r.reason === 'limited')).toBe(true);
   });
 });
 
@@ -146,6 +147,8 @@ describe('passwordLogin', () => {
     expect(results.every((r) => !r.ok)).toBe(true);
     expect(await prisma.auditLog.count({ where: { action: 'auth.login.failure', entityId: u.id } })).toBe(5);
     expect(await prisma.auditLog.count({ where: { action: 'auth.login.locked', entityId: u.id } })).toBe(4);
+    // 5번째 실패와 초과 예약이 함께 잠가도 잠금 감사는 1회(G8)
+    expect(await prisma.auditLog.count({ where: { action: 'auth.lock', entityId: u.id } })).toBe(1);
     const after = await prisma.user.findUniqueOrThrow({ where: { id: u.id } });
     expect(after.lockedUntil!.getTime()).toBeGreaterThan(Date.now() + 14 * 60 * 1000);
   });
