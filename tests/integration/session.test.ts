@@ -116,8 +116,29 @@ describe('adapter', () => {
   const adapter = createOneschAdapter();
 
   it('createUser 는 항상 실패', async () => {
-    await expect(adapter.createUser!({ id: 'x', email: 'n@example.com', emailVerified: null })).rejects.toThrow();
+    await expect(adapter.createUser!({ id: 'x', email: 'n@example.com', emailVerified: null })).rejects.toThrow(
+      'createUser is disabled',
+    );
     expect(await prisma.user.count()).toBe(0);
+  });
+
+  it('getUserByEmail(대소문자 무시)·getUserByAccount 는 내부 필드 없이 돌려준다', async () => {
+    const u = await prisma.user.create({ data: { email: 'a@example.com', name: 'a', passwordHash: 'h', role: 'MEMBER' } });
+    await prisma.account.create({ data: { userId: u.id, type: 'oidc', provider: 'google', providerAccountId: 'sub-1' } });
+    const byEmail = await adapter.getUserByEmail!('A@Example.com');
+    expect(byEmail).toEqual({ id: u.id, email: 'a@example.com', emailVerified: null, name: 'a', image: null, role: 'MEMBER' });
+    expect(await adapter.getUserByAccount!({ provider: 'google', providerAccountId: 'sub-1' })).toEqual(byEmail);
+    expect(await adapter.getUserByAccount!({ provider: 'google', providerAccountId: 'nope' })).toBeNull();
+    expect(await adapter.getUserByEmail!('nobody@example.com')).toBeNull();
+  });
+
+  it('updateSession 은 아무것도 바꾸지 않는다(연장은 loadSession 이 담당)', async () => {
+    const u = await makeUser();
+    await adapter.createSession!({ sessionToken: 'raw-token-3', userId: u.id, expires: new Date() });
+    const before = await prisma.session.findFirstOrThrow();
+    expect(await adapter.updateSession!({ sessionToken: 'raw-token-3', expires: new Date(Date.now() + 30 * 86400_000) })).toBeNull();
+    const after = await prisma.session.findFirstOrThrow();
+    expect(after.expires.getTime()).toBe(before.expires.getTime());
   });
 
   it('createSession 은 평문을 돌려주고 DB 에는 해시', async () => {
@@ -144,8 +165,8 @@ describe('adapter', () => {
     const idToken = (email: string) => `h.${Buffer.from(JSON.stringify({ email })).toString('base64url')}.s`;
     const base = { userId: u.id, type: 'oidc' as const, provider: 'google', providerAccountId: 'g-1' };
 
-    await expect(adapter.linkAccount!({ ...base, id_token: idToken('other@example.com') })).rejects.toThrow();
-    await expect(adapter.linkAccount!({ ...base })).rejects.toThrow();
+    await expect(adapter.linkAccount!({ ...base, id_token: idToken('other@example.com') })).rejects.toThrow('email mismatch');
+    await expect(adapter.linkAccount!({ ...base })).rejects.toThrow('email mismatch');
     expect(await prisma.account.count()).toBe(0);
 
     await adapter.linkAccount!({ ...base, id_token: idToken('A@example.com'), access_token: 'at', refresh_token: 'rt' });
@@ -161,6 +182,6 @@ describe('adapter', () => {
     const idToken = `h.${Buffer.from(JSON.stringify({ email: 'a@example.com' })).toString('base64url')}.s`;
     await expect(
       adapter.linkAccount!({ userId: admin.id, type: 'oidc', provider: 'google', providerAccountId: 'g', id_token: idToken }),
-    ).rejects.toThrow();
+    ).rejects.toThrow('email mismatch');
   });
 });
