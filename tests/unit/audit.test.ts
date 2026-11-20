@@ -52,6 +52,16 @@ describe('maskSensitive', () => {
     });
   });
 
+  it('비밀이 아닌 필드는 이름에 password·token 이 들어가도 보존한다', () => {
+    expect(
+      maskSensitive({ mustChangePassword: false, hasPassword: true, revokedSessions: 2, tokenCount: 3, Set_Cookie: 'x', 'id-token': 'y' }),
+    ).toEqual({ mustChangePassword: false, hasPassword: true, revokedSessions: 2, tokenCount: 3, Set_Cookie: REDACTED, 'id-token': REDACTED });
+  });
+
+  it('비밀 키라도 boolean 값은 그대로', () => {
+    expect(maskSensitive({ password: true })).toEqual({ password: true });
+  });
+
   it('원시값은 그대로', () => {
     expect(maskSensitive('a')).toBe('a');
     expect(maskSensitive(null)).toBeNull();
@@ -59,6 +69,18 @@ describe('maskSensitive', () => {
 });
 
 describe('writeAudit', () => {
+  it('비밀번호 변경 감사의 mustChangePassword 전후 값을 보존한다', async () => {
+    const create = vi.fn().mockResolvedValue({});
+    const db = { auditLog: { create } } as unknown as Parameters<typeof writeAudit>[0];
+    await writeAudit(db, {
+      action: 'auth.password.change',
+      before: { mustChangePassword: true },
+      after: { mustChangePassword: false, revokedSessions: 1 },
+    });
+    expect(create.mock.calls[0][0].data.before).toEqual({ mustChangePassword: true });
+    expect(create.mock.calls[0][0].data.after).toEqual({ mustChangePassword: false, revokedSessions: 1 });
+  });
+
   it('before/after 를 마스킹하고 메타를 기록한다', async () => {
     const create = vi.fn().mockResolvedValue({});
     const db = { auditLog: { create } } as unknown as Parameters<typeof writeAudit>[0];
