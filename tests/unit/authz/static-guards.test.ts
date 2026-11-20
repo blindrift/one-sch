@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -10,27 +10,49 @@ const SRC = join(ROOT, 'src');
 const ACTIONS_DIR = 'src/server/actions/';
 const REQUIRE_ROLE_MODULE = 'src/server/auth/require-role';
 const ACTION_RESULT_MODULE = 'src/server/action-result';
+const CODE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
+const RESOLVE_EXTS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
 
+/** 저장소 전체 검색에서 빼는 폴더(생성물·의존성·데이터) */
+const SKIP_DIRS = new Set(['node_modules', '.next', '.git', 'coverage', 'test-results', 'playwright-report', 'blob-report', 'dist', 'out', 'data', 'backups']);
 /** 라우트 파일에서 허용하는 설정 export(값 export) */
 const ROUTE_SEGMENT_CONFIG = new Set(['dynamic', 'dynamicParams', 'revalidate', 'fetchCache', 'runtime', 'preferredRegion', 'maxDuration', 'metadata']);
+const HTTP_METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
 /** 가드 없이 열어 둔 route handler(정확히 이 파일들만) */
 const PUBLIC_ROUTES = new Set(['src/app/api/auth/[...nextauth]/route.ts', 'src/app/api/health/route.ts']);
 /** requirePage 없이 열어 둔 page(로그인 화면, 리디렉션만 하는 루트) */
 const PUBLIC_PAGES = new Set(['src/app/(auth)/login/page.tsx', 'src/app/page.tsx']);
 /** 데이터 접근을 하면 안 되는 App Router 특수 파일 */
-const NON_GUARDED_SPECIAL = /\/(layout|template|default|not-found|error|global-error|loading|forbidden|unauthorized)\.(ts|tsx|js|jsx)$/;
+const NON_GUARDED_SPECIAL = /\/(layout|template|default|not-found|error|global-error|loading|forbidden|unauthorized)\.(ts|tsx|js|jsx|mjs)$/;
+/** 가드를 붙일 수 없는 메타데이터 라우트 — 필요해지면 그때 규칙을 만든다 */
+const METADATA_ROUTE = /\/(opengraph-image|twitter-image|icon|apple-icon|sitemap|robots|manifest)\d*\.(ts|tsx|js|jsx|mjs)$/;
+/** 데이터 접근 모듈 */
+const DATA_MODULE = /^src\/server\/(db|services)(\/|$)/;
+/**
+ * 특수 파일이 전이적으로 import 해도 되는 모듈(여기서 추적을 멈춘다). 최소로 유지한다.
+ * - current-user: 상단바의 로그인 사용자 표시(세션 판정만, 데이터 조회 없음)
+ * - actions/auth: 상단바 로그아웃 버튼(Server Action 은 자체 정적·동적 정책 검사를 받는다)
+ */
+const LAYOUT_IMPORT_ALLOW = new Set(['src/server/auth/current-user.ts', 'src/server/actions/auth.ts']);
 
-function walk(dir: string): string[] {
+function walk(dir: string, skip = new Set<string>()): string[] {
   return readdirSync(dir).flatMap((name) => {
+    if (skip.has(name)) return [];
     const p = join(dir, name);
-    return statSync(p).isDirectory() ? walk(p) : [p];
+    return statSync(p).isDirectory() ? walk(p, skip) : [p];
   });
 }
 
 const rel = (p: string) => relative(ROOT, p).split(sep).join('/');
 
+const parsed = new Map<string, ts.SourceFile>();
 function parse(file: string) {
-  return ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let sf = parsed.get(file);
+  if (!sf) {
+    sf = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    parsed.set(file, sf);
+  }
+  return sf;
 }
 
 function hasModifier(node: ts.Node, kind: ts.SyntaxKind) {
@@ -66,30 +88,83 @@ function findUseServer(sf: ts.SourceFile): { fileLevel: boolean; inline: string[
   return { fileLevel: directives(sf.statements).includes('use server'), inline };
 }
 
-/** import 된 이름 → 모듈의 저장소 기준 경로(확장자 없음). 상대 경로와 '@/' 별칭을 풀어 준다. */
-function importedFrom(sf: ts.SourceFile, file: string): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const s of sf.statements) {
-    if (!ts.isImportDeclaration(s) || !ts.isStringLiteral(s.moduleSpecifier)) continue;
-    const spec = s.moduleSpecifier.text;
-    const resolved = spec.startsWith('@/')
-      ? `src/${spec.slice(2)}`
-      : spec.startsWith('.')
-        ? rel(resolve(dirname(file), spec))
-        : spec;
-    const named = s.importClause?.namedBindings;
-    if (named && ts.isNamedImports(named)) {
-      for (const el of named.elements) map.set(el.name.text, resolved.replace(/\.(ts|tsx)$/, ''));
-    }
-  }
-  return map;
+/** import 지정자를 저장소 기준 경로로. 파일이 있으면 그 파일 경로, 외부 패키지면 지정자 그대로. */
+function resolveSpecifier(spec: string, fromFile: string): { module: string; file: string | null } {
+  let base: string | null = null;
+  if (spec.startsWith('@/')) base = join(SRC, spec.slice(2));
+  else if (spec.startsWith('.')) base = resolve(dirname(fromFile), spec);
+  if (!base) return { module: spec, file: null };
+  const candidates = [base, ...RESOLVE_EXTS.map((e) => base + e), ...RESOLVE_EXTS.map((e) => join(base!, 'index' + e))];
+  const found = candidates.find((c) => existsSync(c) && statSync(c).isFile()) ?? null;
+  const module = rel(found ?? base).replace(CODE_EXT, '').replace(/\/index$/, '');
+  return { module, file: found };
 }
 
-/** 파일 안에서 이 이름을 직접 선언(함수·변수)했는지 — import 를 가리는 바꿔치기 탐지 */
+type ImportRecord = {
+  module: string;
+  file: string | null;
+  kind: 'named' | 'default' | 'namespace' | 'side-effect' | 're-export';
+  local?: string;
+  imported?: string;
+  typeOnly: boolean;
+};
+
+/** 모든 import·`export … from` 을 종류와 함께 기록한다. */
+function collectImports(sf: ts.SourceFile, file: string): ImportRecord[] {
+  const out: ImportRecord[] = [];
+  for (const s of sf.statements) {
+    if (ts.isImportDeclaration(s) && ts.isStringLiteral(s.moduleSpecifier)) {
+      const target = resolveSpecifier(s.moduleSpecifier.text, file);
+      const clause = s.importClause;
+      if (!clause) {
+        out.push({ ...target, kind: 'side-effect', typeOnly: false });
+        continue;
+      }
+      if (clause.name) out.push({ ...target, kind: 'default', local: clause.name.text, imported: 'default', typeOnly: clause.isTypeOnly });
+      const nb = clause.namedBindings;
+      if (nb && ts.isNamespaceImport(nb)) out.push({ ...target, kind: 'namespace', local: nb.name.text, typeOnly: clause.isTypeOnly });
+      if (nb && ts.isNamedImports(nb)) {
+        for (const el of nb.elements) {
+          out.push({
+            ...target,
+            kind: 'named',
+            local: el.name.text,
+            imported: (el.propertyName ?? el.name).text,
+            typeOnly: clause.isTypeOnly || el.isTypeOnly,
+          });
+        }
+      }
+    } else if (ts.isExportDeclaration(s) && s.moduleSpecifier && ts.isStringLiteral(s.moduleSpecifier)) {
+      out.push({ ...resolveSpecifier(s.moduleSpecifier.text, file), kind: 're-export', typeOnly: s.isTypeOnly });
+    }
+  }
+  return out;
+}
+
+/** src 안 import 그래프를 따라가 데이터 모듈에 닿는 경로(없으면 null). 허용 목록에서는 멈춘다. */
+function pathToDataModule(file: string, seen = new Set<string>()): string[] | null {
+  if (seen.has(file)) return null;
+  seen.add(file);
+  for (const imp of collectImports(parse(file), file)) {
+    if (imp.typeOnly) continue;
+    if (DATA_MODULE.test(imp.module)) return [rel(file), imp.module];
+    if (!imp.file || !rel(imp.file).startsWith('src/') || LAYOUT_IMPORT_ALLOW.has(rel(imp.file))) continue;
+    const rest = pathToDataModule(imp.file, seen);
+    if (rest) return [rel(file), ...rest];
+  }
+  return null;
+}
+
+/** 파일 안에서 이 이름을 직접 선언(함수·변수·매개변수)했는지 — import 를 가리는 바꿔치기 탐지 */
 function declaresLocally(sf: ts.SourceFile, name: string): boolean {
   let found = false;
   const visit = (node: ts.Node) => {
-    if ((ts.isFunctionDeclaration(node) || ts.isVariableDeclaration(node)) && node.name && ts.isIdentifier(node.name) && node.name.text === name) {
+    if (
+      (ts.isFunctionDeclaration(node) || ts.isVariableDeclaration(node) || ts.isParameter(node)) &&
+      node.name &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === name
+    ) {
       found = true;
     }
     if (!found) ts.forEachChild(node, visit);
@@ -154,12 +229,12 @@ function serverExports(sf: ts.SourceFile): { functions: ts.FunctionDeclaration[]
   return { functions, violations };
 }
 
-/** page·route 의 export 중 허용되지 않은 것(설정 값 외의 값 export, 재수출) */
-function extraExports(sf: ts.SourceFile, allowFunction: (fn: ts.FunctionDeclaration) => boolean): string[] {
+/** page 의 export 중 허용되지 않은 것(default 외 함수, 설정 값 외 값 export, 재수출) */
+function pageExtraExports(sf: ts.SourceFile): string[] {
   const problems: string[] = [];
   for (const s of sf.statements) {
     if (ts.isFunctionDeclaration(s) && hasModifier(s, ts.SyntaxKind.ExportKeyword)) {
-      if (!allowFunction(s)) problems.push(`허용되지 않은 함수 export: ${s.name?.text ?? 'default'}`);
+      if (!hasModifier(s, ts.SyntaxKind.DefaultKeyword)) problems.push(`허용되지 않은 함수 export: ${s.name?.text}`);
     } else if (ts.isVariableStatement(s) && hasModifier(s, ts.SyntaxKind.ExportKeyword)) {
       for (const d of s.declarationList.declarations) {
         const name = ts.isIdentifier(d.name) ? d.name.text : d.name.getText(sf);
@@ -174,21 +249,57 @@ function extraExports(sf: ts.SourceFile, allowFunction: (fn: ts.FunctionDeclarat
   return problems;
 }
 
-function requiresFrom(sf: ts.SourceFile, file: string, name: string, module: string): string[] {
-  const from = importedFrom(sf, file).get(name);
+/**
+ * route handler 형태 검사: HTTP 메서드는 `export const GET = withApi(...)` 로만. 함수 선언 export·재수출 금지.
+ * withApi 가 권한 검사를 통과해야만 handler 를 부르므로 검사 결과를 버리는 코드가 생길 수 없다.
+ */
+function routeProblems(sf: ts.SourceFile): string[] {
   const problems: string[] = [];
-  if (from !== module) problems.push(`${name} 을(를) ${module} 에서 import 하지 않음(${from ?? '없음'})`);
+  for (const s of sf.statements) {
+    if (ts.isFunctionDeclaration(s) && hasModifier(s, ts.SyntaxKind.ExportKeyword)) {
+      problems.push(`함수 선언 export 금지(withApi 로 감싸기): ${s.name?.text ?? 'default'}`);
+    } else if (ts.isVariableStatement(s) && hasModifier(s, ts.SyntaxKind.ExportKeyword)) {
+      for (const d of s.declarationList.declarations) {
+        const name = ts.isIdentifier(d.name) ? d.name.text : d.name.getText(sf);
+        if (ROUTE_SEGMENT_CONFIG.has(name)) continue;
+        if (!HTTP_METHODS.has(name)) {
+          problems.push(`허용되지 않은 값 export: ${name}`);
+          continue;
+        }
+        const init = d.initializer;
+        const wrapped = !!init && ts.isCallExpression(init) && ts.isIdentifier(init.expression) && init.expression.text === 'withApi';
+        if (!wrapped) problems.push(`${name} 은 withApi(...) 호출 결과여야 함`);
+      }
+    } else if (ts.isExportDeclaration(s) && !s.isTypeOnly) {
+      problems.push(`재수출 금지: ${s.getText(sf).slice(0, 60)}`);
+    } else if (ts.isExportAssignment(s)) {
+      problems.push('export default 금지');
+    }
+  }
+  return problems;
+}
+
+/** name 이 정해진 모듈에서 **같은 이름으로**(별칭 없이) import 됐고, 파일 안에서 다시 선언되지 않았는지 */
+function requiresFrom(sf: ts.SourceFile, file: string, name: string, module: string): string[] {
+  const problems: string[] = [];
+  const imps = collectImports(sf, file).filter((i) => i.local === name);
+  const ok = imps.length === 1 && imps[0].kind === 'named' && imps[0].imported === name && imps[0].module === module && !imps[0].typeOnly;
+  if (!ok) {
+    const got = imps.map((i) => `${i.module}#${i.imported ?? i.kind}`).join(', ') || '없음';
+    problems.push(`${name} 을(를) ${module} 에서 같은 이름으로 import 하지 않음(${got})`);
+  }
   if (declaresLocally(sf, name)) problems.push(`${name} 을(를) 파일 안에서 다시 선언함`);
   return problems;
 }
 
-const srcFiles = walk(SRC).filter((f) => /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(f));
+const repoFiles = walk(ROOT, SKIP_DIRS).filter((f) => CODE_EXT.test(f));
+const srcFiles = repoFiles.filter((f) => rel(f).startsWith('src/'));
 const actionFiles = srcFiles.filter((f) => rel(f).startsWith(ACTIONS_DIR));
 
 describe('정적 권한 검사', () => {
-  it("'use server' 는 src/server/actions/ 의 .ts·.tsx 파일 첫 줄에만 있다(인라인 액션 금지)", () => {
+  it("'use server' 는 저장소 전체에서 src/server/actions/ 의 .ts·.tsx 파일 첫 줄에만 있다(인라인 액션 금지)", () => {
     const problems: string[] = [];
-    for (const file of srcFiles) {
+    for (const file of repoFiles) {
       const { fileLevel, inline } = findUseServer(parse(file));
       const inActions = rel(file).startsWith(ACTIONS_DIR) && /\.(ts|tsx)$/.test(file);
       if (fileLevel && !inActions) problems.push(`${rel(file)}: actions 폴더 밖의 'use server' 파일`);
@@ -198,6 +309,16 @@ describe('정적 권한 검사', () => {
       if (!findUseServer(parse(file)).fileLevel) problems.push(`${rel(file)}: 'use server' 가 첫 줄이 아님`);
     }
     expect(problems).toEqual([]);
+  });
+
+  it('Pages Router·루트 app 폴더처럼 가드 규칙 밖의 라우팅 진입점이 없다', () => {
+    // 루트에 app/·pages/ 가 있으면 Next 는 src/ 를 무시하고, src/pages 는 App Router 와 별도로 라우팅된다.
+    for (const dir of ['pages', 'app', 'src/pages']) expect(existsSync(join(ROOT, dir)), dir).toBe(false);
+  });
+
+  it('메타데이터 라우트(opengraph-image·icon·sitemap·robots·manifest 등) 코드 파일을 두지 않는다', () => {
+    const found = srcFiles.filter((f) => rel(f).startsWith('src/app/') && METADATA_ROUTE.test(rel(f))).map(rel);
+    expect(found).toEqual([]);
   });
 
   it('Server Action 은 PUBLIC 예외를 빼고 첫 문장에서 require-role 의 requireRole 을 호출한다', () => {
@@ -230,45 +351,40 @@ describe('정적 권한 검사', () => {
   });
 
   it('page 는 첫 문장에서 requirePage 를 호출하고, default 외 함수·값 export 가 없다', () => {
-    const pages = srcFiles.filter((f) => /\/page\.(ts|tsx|js|jsx)$/.test(rel(f)));
+    const pages = srcFiles.filter((f) => /\/page\.(ts|tsx|js|jsx|mjs)$/.test(rel(f)));
     expect(pages.length).toBeGreaterThan(0);
     const problems: string[] = [];
     for (const file of pages) {
       const sf = parse(file);
-      const isDefault = (fn: ts.FunctionDeclaration) => hasModifier(fn, ts.SyntaxKind.DefaultKeyword);
-      problems.push(...extraExports(sf, isDefault).map((p) => `${rel(file)}: ${p}`));
+      problems.push(...pageExtraExports(sf).map((p) => `${rel(file)}: ${p}`));
       if (PUBLIC_PAGES.has(rel(file))) continue;
-      const fn = sf.statements.find((s): s is ts.FunctionDeclaration => ts.isFunctionDeclaration(s) && isDefault(s));
+      const fn = sf.statements.find(
+        (s): s is ts.FunctionDeclaration => ts.isFunctionDeclaration(s) && hasModifier(s, ts.SyntaxKind.DefaultKeyword),
+      );
       if (!fn || !isAwaitCall(fn.body?.statements[0], 'requirePage')) problems.push(`${rel(file)}: 첫 문장이 requirePage 가 아님`);
       problems.push(...requiresFrom(sf, file, 'requirePage', REQUIRE_ROLE_MODULE).map((p) => `${rel(file)}: ${p}`));
     }
     expect(problems).toEqual([]);
   });
 
-  it('layout·template·not-found 등 가드 없는 특수 파일은 DB·서비스를 import 하지 않는다', () => {
-    const problems: string[] = [];
-    for (const file of srcFiles.filter((f) => NON_GUARDED_SPECIAL.test(rel(f)))) {
-      for (const mod of new Set(importedFrom(parse(file), file).values())) {
-        if (/^src\/server\/(db|services)(\/|$)/.test(mod)) problems.push(`${rel(file)}: ${mod}`);
-      }
-    }
+  it('layout·template·not-found 등 가드 없는 특수 파일은 DB·서비스에 직접·간접으로 닿지 않는다', () => {
+    const targets = srcFiles.filter((f) => NON_GUARDED_SPECIAL.test(rel(f)) || METADATA_ROUTE.test(rel(f)));
+    expect(targets.length).toBeGreaterThan(0);
+    const problems = targets
+      .map((f) => pathToDataModule(f))
+      .filter((p): p is string[] => p !== null)
+      .map((p) => p.join(' → '));
     expect(problems).toEqual([]);
   });
 
-  it('공개 2개를 뺀 route handler 는 모든 handler 첫 문장에서 requireApi 를 호출한다', () => {
+  it('공개 2개를 뺀 route handler 는 모든 HTTP 메서드를 withApi(...) 로만 export 한다', () => {
     const routes = srcFiles.filter((f) => /\/route\.(ts|tsx|js|jsx|mjs)$/.test(rel(f)));
     const problems: string[] = [];
     for (const file of routes) {
-      const sf = parse(file);
       if (PUBLIC_ROUTES.has(rel(file))) continue;
-      const handlers = sf.statements.filter(
-        (s): s is ts.FunctionDeclaration => ts.isFunctionDeclaration(s) && hasModifier(s, ts.SyntaxKind.ExportKeyword),
-      );
-      problems.push(...extraExports(sf, () => true).map((p) => `${rel(file)}: ${p}`));
-      for (const fn of handlers) {
-        if (!isAwaitCall(fn.body?.statements[0], 'requireApi')) problems.push(`${rel(file)}: ${fn.name?.text} 첫 문장이 requireApi 가 아님`);
-      }
-      if (handlers.length) problems.push(...requiresFrom(sf, file, 'requireApi', REQUIRE_ROLE_MODULE).map((p) => `${rel(file)}: ${p}`));
+      const sf = parse(file);
+      problems.push(...routeProblems(sf).map((p) => `${rel(file)}: ${p}`));
+      problems.push(...requiresFrom(sf, file, 'withApi', REQUIRE_ROLE_MODULE).map((p) => `${rel(file)}: ${p}`));
     }
     expect(problems).toEqual([]);
     // 공개 route 로 지정한 파일은 실제로 있어야 한다(이름만 남은 예외 금지)

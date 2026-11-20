@@ -58,21 +58,31 @@ export async function requireRole(minRole: Role, opts: RequireOptions = {}): Pro
 }
 
 /**
- * 모든 route handler(auth·health 제외)의 첫 문장. 통과하면 사용자, 아니면 401/403 JSON 응답을 돌려준다.
- * 사용: `const auth = await requireApi('VIEWER'); if (auth instanceof Response) return auth;`
+ * route handler 를 감싸는 유일한 방법. 권한 검사를 통과해야만 handler 가 실행된다(fail-closed).
+ * 사용: `export const GET = withApi('VIEWER', async (req, ctx, user) => Response.json(...));`
+ * 세션 없음 → 401, 권한 부족·비밀번호 변경 필요 → 403 JSON(no-store). 그 밖의 오류는 그대로 던진다.
+ * handler 결과를 받지 않고 검사만 하는 형태가 없으므로 "검사 결과를 버리는" 실수가 구조적으로 불가능하다.
  */
-export async function requireApi(minRole: Role, opts: RequireOptions = {}): Promise<SessionUser | Response> {
-  try {
-    return await requireRole(minRole, opts);
-  } catch (err) {
-    if (err instanceof AppError && (err.code === 'UNAUTHENTICATED' || err.code === 'FORBIDDEN')) {
-      return Response.json(
-        { ok: false, code: err.code, message: err.message },
-        { status: err.code === 'UNAUTHENTICATED' ? 401 : 403, headers: { 'Cache-Control': 'no-store' } },
-      );
+export function withApi<Ctx = unknown>(
+  minRole: Role,
+  handler: (req: Request, ctx: Ctx, user: SessionUser) => Promise<Response>,
+  opts: RequireOptions = {},
+): (req: Request, ctx: Ctx) => Promise<Response> {
+  return async (req, ctx) => {
+    let user: SessionUser;
+    try {
+      user = await requireRole(minRole, opts);
+    } catch (err) {
+      if (err instanceof AppError && (err.code === 'UNAUTHENTICATED' || err.code === 'FORBIDDEN')) {
+        return Response.json(
+          { ok: false, code: err.code, message: err.message },
+          { status: err.code === 'UNAUTHENTICATED' ? 401 : 403, headers: { 'Cache-Control': 'no-store' } },
+        );
+      }
+      throw err;
     }
-    throw err;
-  }
+    return handler(req, ctx, user);
+  };
 }
 
 /** 모든 page.tsx 의 첫 문장. 로그인 화면·비밀번호 변경 화면으로 보내거나 403 을 낸다. */
