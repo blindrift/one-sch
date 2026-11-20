@@ -1,0 +1,31 @@
+# 개발·테스트용 PostgreSQL. 운영 compose 와 같은 db-init 으로 역할을 만든다.
+# 실행: npm run db:up  (값은 .env.local 의 POSTGRES_PASSWORD·APP_DB_PASSWORD·MIGRATOR_DB_PASSWORD·BACKUP_DB_PASSWORD)
+name: one-sch-dev
+
+services:
+  db:
+    # postgres:16-alpine 멀티 아키텍처 인덱스 다이제스트(개발 PC arm64 에서 네이티브 실행)
+    image: postgres:16-alpine@sha256:1d5b02d3a9941fbd52437db4107f8c52d6297dac553ca1e5c299ebb3756b4857
+    environment:
+      POSTGRES_DB: onesch
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD}
+      MIGRATOR_DB_PASSWORD: ${MIGRATOR_DB_PASSWORD:?MIGRATOR_DB_PASSWORD}
+      BACKUP_DB_PASSWORD: ${BACKUP_DB_PASSWORD:?BACKUP_DB_PASSWORD}
+      EXTRA_DATABASES: onesch_test onesch_e2e
+      OWNER_CREATEDB: "true"
+      TZ: Asia/Seoul
+    # 운영(TZ=Asia/Seoul 로 initdb)과 같이 UTC 가 아닌 시간대로 둬 시각 파라미터 처리를 같은 조건에서 시험한다.
+    command: ["postgres", "-c", "password_encryption=scram-sha-256", "-c", "timezone=Asia/Seoul"]
+    ports: ["127.0.0.1:5433:5432"]
+    volumes:
+      - dev-pgdata:/var/lib/postgresql/data
+      - ./docker/db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d onesch"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  dev-pgdata: {}
