@@ -13,6 +13,8 @@ const nextConfig: NextConfig = {
   images: { unoptimized: true },
   experimental: {
     serverActions: { bodySizeLimit: '1mb' },
+    // forbidden() → app/forbidden.tsx(403)
+    authInterrupts: true,
   },
   outputFileTracingIncludes: {
     '/**': ['./node_modules/.prisma/client/**'],
