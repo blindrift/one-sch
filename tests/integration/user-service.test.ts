@@ -1,4 +1,20 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// 감사 기록만 골라 실패시키기 위한 래퍼(나머지는 실제 구현).
+const audit = vi.hoisted(() => ({ failNext: false }));
+vi.mock('@/server/audit', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/server/audit')>();
+  return {
+    ...real,
+    writeAudit: async (...args: Parameters<typeof real.writeAudit>) => {
+      if (audit.failNext) {
+        audit.failNext = false;
+        throw new Error('audit down');
+      }
+      return real.writeAudit(...args);
+    },
+  };
+});
 import { prisma } from '@/server/db';
 import { AppError } from '@/server/action-result';
 import { hashPassword, verifyPassword } from '@/server/auth/password';
@@ -182,8 +198,9 @@ describe('user-service', () => {
     const admin = await makeUser('admin@example.com', 'ADMIN');
     const t = await makeUser('t@example.com');
     await createSession(prisma, { userId: t.id });
-    // PostgreSQL text 는 NUL 문자를 받지 않으므로 감사 INSERT 만 실패한다.
-    await expect(users.updateUserRole(admin, t.id, 'MEMBER', { ip: 'bad\u0000ip', userAgent: null })).rejects.toThrow();
+    // 역할 변경·세션 삭제가 끝난 뒤 감사 기록에서 실패시킨다.
+    audit.failNext = true;
+    await expect(users.updateUserRole(admin, t.id, 'MEMBER', meta)).rejects.toThrow('audit down');
     expect((await prisma.user.findUniqueOrThrow({ where: { id: t.id } })).role).toBe('VIEWER');
     expect(await prisma.session.count({ where: { userId: t.id } })).toBe(1);
   });

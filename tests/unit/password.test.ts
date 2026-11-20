@@ -37,7 +37,7 @@ describe('hash/verify', () => {
   });
 
   it('129자 비밀번호는 해시를 거부하고 검증은 false', async () => {
-    await expect(hashPassword('x'.repeat(129))).rejects.toThrow();
+    await expect(hashPassword('x'.repeat(129))).rejects.toThrow('password too long');
     const h = await hashPassword('x'.repeat(128));
     expect(await verifyPassword(h, 'x'.repeat(129))).toBe(false);
   });

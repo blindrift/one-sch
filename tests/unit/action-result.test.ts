@@ -26,8 +26,10 @@ describe('toActionResult', () => {
   });
 
   it('redirect·notFound 는 다시 던진다', async () => {
-    await expect(toActionResult(async () => redirect('/login'))).rejects.toThrow();
-    await expect(toActionResult(async () => notFound())).rejects.toThrow();
+    await expect(toActionResult(async () => redirect('/login'))).rejects.toMatchObject({
+      digest: expect.stringMatching(/^NEXT_REDIRECT;replace;\/login;307;/),
+    });
+    await expect(toActionResult(async () => notFound())).rejects.toMatchObject({ digest: 'NEXT_HTTP_ERROR_FALLBACK;404' });
   });
 
   it('알 수 없는 오류는 INTERNAL 이고 상세를 노출하지 않는다', async () => {
