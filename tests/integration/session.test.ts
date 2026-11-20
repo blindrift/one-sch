@@ -7,7 +7,7 @@ import {
   loadSession,
 } from '@/server/auth/session';
 import { createOneschAdapter } from '@/server/auth/adapter';
-import { ownerDb, resetDb } from '../helpers/db';
+import { disconnectAll, resetDb } from '../helpers/db';
 
 const H = 60 * 60 * 1000;
 const D = 24 * H;
@@ -19,7 +19,7 @@ async function makeUser(data: Partial<{ email: string; active: boolean }> = {}) 
 beforeEach(resetDb);
 afterAll(async () => {
   await prisma.$disconnect();
-  await ownerDb.$disconnect();
+  await disconnectAll();
 });
 
 describe('session', () => {

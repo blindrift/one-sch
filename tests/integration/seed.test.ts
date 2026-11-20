@@ -1,10 +1,10 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { seed } from '../../prisma/seed';
 import { verifyPassword } from '@/server/auth/password';
-import { ownerDb, resetDb } from '../helpers/db';
+import { disconnectAll, ownerDb, resetDb } from '../helpers/db';
 
 beforeEach(resetDb);
-afterAll(() => ownerDb.$disconnect());
+afterAll(disconnectAll);
 
 describe('seed', () => {
   it('빈 DB 에 admin/admin 을 변경 강제로 만든다', async () => {

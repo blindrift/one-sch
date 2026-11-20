@@ -4,7 +4,7 @@ import { AppError } from '@/server/action-result';
 import { hashPassword, verifyPassword } from '@/server/auth/password';
 import { createSession, loadSession } from '@/server/auth/session';
 import * as users from '@/server/services/user-service';
-import { ownerDb, resetDb } from '../helpers/db';
+import { disconnectAll, resetDb } from '../helpers/db';
 
 const meta = { ip: '127.0.0.1', userAgent: 'vitest' };
 
@@ -25,7 +25,7 @@ async function reasonOf(p: Promise<unknown>) {
 beforeEach(resetDb);
 afterAll(async () => {
   await prisma.$disconnect();
-  await ownerDb.$disconnect();
+  await disconnectAll();
 });
 
 describe('user-service', () => {
