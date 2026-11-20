@@ -4,7 +4,16 @@ import { firstInWindow } from '../audit-throttle';
 import { prisma } from '../db';
 import { log } from '../log';
 import type { RequestMeta } from '../request-meta';
-import { checkIpRate, LOCK_THRESHOLD, lockUser, markAttemptSuccess, mayVerify, reserveAttempt } from '../auth/login-guard';
+import {
+  checkIpRate,
+  LOCK_MS,
+  LOCK_THRESHOLD,
+  lockUser,
+  markAttemptSuccess,
+  mayVerify,
+  reserveAttempt,
+  type IpRateResult,
+} from '../auth/login-guard';
 import { dummyVerify, hashPassword, isSameAsCurrent, passwordPolicyErrors, verifyPassword } from '../auth/password';
 import { createSession, hashToken } from '../auth/session';
 
@@ -16,11 +25,27 @@ export type PasswordLoginResult =
  * 한도 초과는 공격이 이어지는 동안 계속 들어오므로 IP·분 단위 첫 1회만 감사 로그에 남기고 나머지는 앱 로그로.
  * (감사 로그는 append-only 라 쌓이면 정리 비용이 크다.)
  */
-async function auditRateLimited(action: string, meta: RequestMeta, actorId: string | null = null) {
+async function auditRateLimited(action: string, meta: RequestMeta, rate: IpRateResult, actorId: string | null = null) {
+  // 연결 풀 고갈(busy)은 공격 신호가 아닐 수 있고 감사 기록이 DB 를 더 쓰므로 앱 로그만 남긴다.
+  if (!rate.ok && rate.reason === 'busy') {
+    log.warn(`${action}.busy`, { ip: meta.ip });
+    return;
+  }
   if (firstInWindow(`${action}:${meta.ip}`)) {
     await writeAudit(prisma, { actorId, action, after: { window: '1m', note: 'first in window' }, meta });
   } else {
     log.warn(action, { ip: meta.ip });
+  }
+}
+
+/**
+ * 계정 잠금 감사. 동시 폭주에서는 5번째 실패와 초과 예약(n>5)이 거의 동시에 잠글 수 있으므로
+ * 잠금 창(15분)마다 첫 1회만 남긴다.
+ */
+async function lockAndAudit(userId: string, now: Date, meta: RequestMeta, after: Record<string, unknown>, actorId: string | null = null) {
+  await lockUser(userId, now);
+  if (firstInWindow(`auth.lock:${userId}`, LOCK_MS, now.getTime())) {
+    await writeAudit(prisma, { actorId, action: 'auth.lock', entity: 'User', entityId: userId, after, meta });
   }
 }
 
@@ -43,9 +68,9 @@ export async function passwordLogin(input: {
   const now = input.now ?? new Date();
   const { username, password, meta } = input;
 
-  const attemptId = await checkIpRate(meta.ip, now);
-  if (attemptId === null) {
-    await auditRateLimited('auth.login.rate_limited', meta);
+  const rate = await checkIpRate(meta.ip, now);
+  if (!rate.ok) {
+    await auditRateLimited('auth.login.rate_limited', meta, rate);
     return { ok: false, reason: 'rate_limited' };
   }
 
@@ -66,17 +91,15 @@ export async function passwordLogin(input: {
   const reserved = await reserveAttempt(user.id, now);
   if (!mayVerify(reserved)) {
     await dummyVerify(password);
-    if (reserved !== null) await lockUser(user.id, now);
+    // 동시 폭주로 5회를 넘겨 예약된 시도: 검증하지 않고 잠근다.
+    if (reserved !== null) await lockAndAudit(user.id, now, meta, { username });
     await writeAudit(prisma, { action: 'auth.login.locked', entity: 'User', entityId: user.id, after: { username }, meta });
     return { ok: false, reason: 'invalid' };
   }
 
   if (!(await verifyPassword(user.passwordHash, password))) {
     await writeAudit(prisma, { action: 'auth.login.failure', entity: 'User', entityId: user.id, after: { username }, meta });
-    if (reserved >= LOCK_THRESHOLD) {
-      await lockUser(user.id, now);
-      await writeAudit(prisma, { action: 'auth.lock', entity: 'User', entityId: user.id, after: { username }, meta });
-    }
+    if (reserved >= LOCK_THRESHOLD) await lockAndAudit(user.id, now, meta, { username });
     return { ok: false, reason: 'invalid' };
   }
 
@@ -95,7 +118,7 @@ export async function passwordLogin(input: {
       userAgent: meta.userAgent,
       now,
     });
-    await markAttemptSuccess(tx, attemptId);
+    await markAttemptSuccess(tx, rate.attemptId);
     await writeAudit(tx, {
       actorId: user.id,
       action: 'auth.login.success',
@@ -125,8 +148,9 @@ export async function changeOwnPassword(input: {
   const now = input.now ?? new Date();
   const { meta } = input;
 
-  if ((await checkIpRate(meta.ip, now)) === null) {
-    await auditRateLimited('auth.password.rate_limited', meta, input.userId);
+  const rate = await checkIpRate(meta.ip, now);
+  if (!rate.ok) {
+    await auditRateLimited('auth.password.rate_limited', meta, rate, input.userId);
     return { ok: false, reason: 'rate_limited' };
   }
 
@@ -138,10 +162,8 @@ export async function changeOwnPassword(input: {
   const verified = mayVerify(reserved) && (await verifyPassword(user.passwordHash, input.currentPassword));
   if (!verified) {
     if (!mayVerify(reserved)) await dummyVerify(input.currentPassword);
-    const lockNow = reserved !== null && reserved >= LOCK_THRESHOLD;
-    if (lockNow) await lockUser(user.id, now);
     await writeAudit(prisma, { actorId: user.id, action: 'auth.password.change_failure', entity: 'User', entityId: user.id, meta });
-    if (lockNow) await writeAudit(prisma, { actorId: user.id, action: 'auth.lock', entity: 'User', entityId: user.id, meta });
+    if (reserved !== null && reserved >= LOCK_THRESHOLD) await lockAndAudit(user.id, now, meta, {}, user.id);
     return { ok: false, reason: 'invalid_current' };
   }
 
