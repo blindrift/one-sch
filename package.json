@@ -52,5 +52,12 @@
     "tailwindcss": "4.3.5",
     "typescript": "5.9.3",
     "vitest": "4.1.12"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "8.5.33"
+    },
+    "effect": "3.22.5",
+    "deepmerge-ts": "8.0.2"
   }
 }
