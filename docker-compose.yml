@@ -1,0 +1,123 @@
+# 운영(NAS) 구성. 값은 같은 폴더의 .env(권한 600)에 둔다. 키 목록은 .env.example.
+# 호스트에 열리는 포트는 app 의 127.0.0.1:3000 하나뿐이다(DSM 리버스 프록시 전용).
+name: one-sch
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+x-hardening: &hardening
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  read_only: true
+
+services:
+  db:
+    # postgres:16-alpine linux/amd64 매니페스트 다이제스트(2026-11-19)
+    image: postgres:16-alpine@sha256:9d9e487c1bd6413c52ccb3c02f46c8e37fa1e1d1a32a84519eb4e68d0ad1da30
+    <<: *hardening
+    # 공식 엔트리포인트가 데이터 디렉터리 chown 후 postgres 사용자로 내려가는 데 필요한 최소 권한
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    environment:
+      POSTGRES_DB: onesch
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD}
+      MIGRATOR_DB_PASSWORD: ${MIGRATOR_DB_PASSWORD:?MIGRATOR_DB_PASSWORD}
+      BACKUP_DB_PASSWORD: ${BACKUP_DB_PASSWORD:?BACKUP_DB_PASSWORD}
+      TZ: Asia/Seoul
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=30", "-c", "password_encryption=scram-sha-256"]
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./docker/db-init:/docker-entrypoint-initdb.d:ro
+    tmpfs: ["/var/run/postgresql:uid=70,gid=70", "/tmp"]
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d onesch"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 384m
+    pids_limit: 100
+    restart: unless-stopped
+    logging: *logging
+
+  migrate:
+    image: one-sch-migrate:${APP_VERSION:-latest}
+    <<: *hardening
+    environment:
+      DATABASE_URL: postgresql://onesch_owner:${MIGRATOR_DB_PASSWORD}@db:5432/onesch?schema=public
+      TZ: Asia/Seoul
+    tmpfs: ["/tmp"]
+    networks: [backend]
+    depends_on:
+      db: { condition: service_healthy }
+    mem_limit: 256m
+    restart: "no"
+    logging: *logging
+
+  app:
+    image: one-sch-app:${APP_VERSION:-latest}
+    <<: *hardening
+    environment:
+      DATABASE_URL: postgresql://onesch_app:${APP_DB_PASSWORD}@db:5432/onesch?schema=public&connection_limit=5
+      AUTH_URL: ${AUTH_URL:?AUTH_URL}
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET}
+      AUTH_GOOGLE_ID: ${AUTH_GOOGLE_ID:-}
+      AUTH_GOOGLE_SECRET: ${AUTH_GOOGLE_SECRET:-}
+      LOCAL_LOGIN_ENABLED: ${LOCAL_LOGIN_ENABLED:-true}
+      # DSM 리버스 프록시가 덮어쓰는 클라이언트 IP 헤더(설계서 10.2)
+      CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-x-real-ip}
+      ENABLE_POC: ${ENABLE_POC:-false}
+      TZ: Asia/Seoul
+    ports: ["127.0.0.1:3000:3000"]
+    tmpfs: ["/tmp", "/app/.next/cache:uid=1000,gid=1000"]
+    networks: [frontend, backend]
+    depends_on:
+      db: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    mem_limit: 512m
+    pids_limit: 200
+    restart: unless-stopped
+    logging: *logging
+
+  backup:
+    image: postgres:16-alpine@sha256:9d9e487c1bd6413c52ccb3c02f46c8e37fa1e1d1a32a84519eb4e68d0ad1da30
+    <<: *hardening
+    user: "70:70"
+    entrypoint: ["/bin/sh", "/scripts/backup-loop.sh"]
+    environment:
+      PGHOST: db
+      PGDATABASE: onesch
+      PGUSER: onesch_backup
+      PGPASSWORD: ${BACKUP_DB_PASSWORD:?BACKUP_DB_PASSWORD}
+      TZ: Asia/Seoul
+      BACKUP_RETENTION_DAYS: "7"
+    volumes:
+      - ./backups:/backups
+      - ./scripts/backup.sh:/scripts/backup.sh:ro
+      - ./scripts/backup-loop.sh:/scripts/backup-loop.sh:ro
+    tmpfs: ["/tmp"]
+    networks: [backend]
+    depends_on:
+      db: { condition: service_healthy }
+    healthcheck:
+      # 최근 26시간 안의 덤프가 있거나, 컨테이너가 뜬 지 26시간이 안 됐으면 정상
+      test: ["CMD-SHELL", "test -n \"$$(find /backups -name 'one-sch-*.dump' -mmin -1560)\" || test $$(( $$(date +%s) - $$(stat -c %Y /proc/1) )) -lt 93600"]
+      interval: 1h
+      timeout: 10s
+      retries: 1
+    mem_limit: 128m
+    pids_limit: 50
+    restart: unless-stopped
+    logging: *logging
+
+networks:
+  frontend: {}
+  # 외부로 나가는 경로도 없는 내부 네트워크
+  backend: { internal: true }
