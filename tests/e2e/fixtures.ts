@@ -8,7 +8,7 @@ export const INVALID = '아이디 또는 비밀번호가 올바르지 않습니�
 export const NEW_PASSWORD = 'e2e-Strong-pass-42';
 
 let ipSeq = 0;
-/** 테스트마다 다른 클라이언트 IP(프록시가 붙인 XFF 가장 오른쪽 값)로 IP 제한이 섞이지 않게 한다. */
+/** 테스트마다 다른 클라이언트 IP(프록시가 덮어쓰는 X-Real-IP)로 IP 제한이 섞이지 않게 한다. */
 export function nextIp() {
   ipSeq += 1;
   return `198.51.100.${(ipSeq % 250) + 1}`;
@@ -20,7 +20,7 @@ export const test = base.extend<{ ip: string }>({
     await provide(nextIp());
   },
   context: async ({ browser, ip }, provide) => {
-    const context = await browser.newContext({ extraHTTPHeaders: { 'X-Forwarded-For': ip } });
+    const context = await browser.newContext({ extraHTTPHeaders: { 'X-Real-IP': ip } });
     await provide(context);
     await context.close();
   },

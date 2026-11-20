@@ -61,7 +61,7 @@ test('사용자 등록 → 역할 변경(대상 세션 무효) → 비활성화 
   expect(temp).toHaveLength(24);
   await page.getByRole('button', { name: '닫기' }).first().click();
 
-  const adminCtx = await browser.newContext({ extraHTTPHeaders: { 'X-Forwarded-For': '203.0.113.99' } });
+  const adminCtx = await browser.newContext({ extraHTTPHeaders: { 'X-Real-IP': '203.0.113.99' } });
   const adminPage = await adminCtx.newPage();
   await login(adminPage, 'admin', temp);
   await expect(adminPage).toHaveURL(/\/change-password$/);
