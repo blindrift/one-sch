@@ -174,6 +174,51 @@ describe('withApi', () => {
     expect(handler.mock.calls[0][2]).toMatchObject({ id: 'u1', role: 'MEMBER' });
   });
 
+  it('handler 의 AppError 는 코드별 상태로, INTERNAL 은 일반 문구 500(H8)', async () => {
+    state.user = user('MEMBER');
+    const cases: Array<[string, number]> = [
+      ['VALIDATION', 400],
+      ['UNAUTHENTICATED', 401],
+      ['FORBIDDEN', 403],
+      ['NOT_FOUND', 404],
+      ['CONFLICT', 409],
+      ['RATE_LIMITED', 429],
+    ];
+    for (const [code, status] of cases) {
+      const r = withApi('MEMBER', async () => {
+        throw new AppError(code as never, 'why', `msg-${code}`);
+      });
+      const res = await r(new Request('http://localhost/'), {});
+      expect(res.status, code).toBe(status);
+      expect(await res.json()).toEqual({ ok: false, code, message: `msg-${code}` });
+      expect(res.headers.get('cache-control')).toBe('no-store');
+    }
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const internal = await withApi('MEMBER', async () => {
+      throw new AppError('INTERNAL', 'db', 'connect ECONNREFUSED password=hunter2');
+    })(new Request('http://localhost/'), {});
+    spy.mockRestore();
+    expect(internal.status).toBe(500);
+    expect(await internal.json()).toEqual({ ok: false, code: 'INTERNAL', message: '처리 중 오류가 발생했습니다.' });
+  });
+
+  it('handler 의 ZodError·fieldErrors 는 400 과 필드 오류', async () => {
+    state.user = user('MEMBER');
+    const { z } = await import('zod');
+    const res = await withApi('MEMBER', async () => {
+      z.object({ name: z.string().min(1) }).parse({ name: '' });
+      return Response.json({});
+    })(new Request('http://localhost/'), {});
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: false, code: 'VALIDATION' });
+    expect(body.fieldErrors.name).toHaveLength(1);
+    const conflict = await withApi('MEMBER', async () => {
+      throw new AppError('CONFLICT', 'dup', '이미 있음', { email: ['이미 등록된 이메일입니다.'] });
+    })(new Request('http://localhost/'), {});
+    expect(await conflict.json()).toEqual({ ok: false, code: 'CONFLICT', message: '이미 있음', fieldErrors: { email: ['이미 등록된 이메일입니다.'] } });
+  });
+
   it('권한 외 오류(예: DB 오류)는 응답으로 감추지 않고 그대로 던진다', async () => {
     state.user = user('MEMBER');
     const boom = withApi('MEMBER', async () => {
