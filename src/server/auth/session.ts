@@ -55,7 +55,7 @@ export async function createSession(
 }
 
 /**
- * 세션 판정의 유일한 기준. 유휴 만료·절대 7일·비활성 사용자는 세션을 지우고 null.
+ * 세션 판정의 유일한 기준. 유휴 만료·절대 7일·비활성 사용자·로컬 로그인 꺼짐(로컬 전용 계정)은 세션을 지우고 null.
  * 마지막 갱신에서 5분이 지났을 때만 유휴 만료를 연장한다.
  */
 export async function loadSession(rawToken: string | null | undefined, now = new Date()): Promise<SessionWithUser | null> {
@@ -67,7 +67,10 @@ export async function loadSession(rawToken: string | null | undefined, now = new
   if (!session) return null;
 
   const absoluteEnd = session.createdAt.getTime() + SESSION_ABSOLUTE_SECONDS * 1000;
-  if (session.expires.getTime() <= now.getTime() || absoluteEnd <= now.getTime() || !session.user.active) {
+  // 로컬 로그인을 끈 뒤에는 로컬 전용 계정(비밀번호 있고 이메일 없음)의 남은 세션도 바로 끊는다.
+  const localOnly = session.user.passwordHash !== null && session.user.email === null;
+  const localDisabled = localOnly && process.env.LOCAL_LOGIN_ENABLED !== 'true';
+  if (session.expires.getTime() <= now.getTime() || absoluteEnd <= now.getTime() || !session.user.active || localDisabled) {
     await prisma.session.deleteMany({ where: { id: session.id } });
     return null;
   }

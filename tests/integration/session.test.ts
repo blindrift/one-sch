@@ -85,6 +85,22 @@ describe('session', () => {
     expect(await prisma.session.count()).toBe(0);
   });
 
+  it('로컬 로그인을 끄면 로컬 전용 계정 세션은 무효, 구글 계정 세션은 유지(SEC-5)', async () => {
+    const local = await prisma.user.create({ data: { username: 'admin', name: 'a', passwordHash: 'x' } });
+    const google = await makeUser({ email: 'g@example.com' });
+    const l = await createSession(prisma, { userId: local.id });
+    const g = await createSession(prisma, { userId: google.id });
+    const saved = process.env.LOCAL_LOGIN_ENABLED;
+    try {
+      process.env.LOCAL_LOGIN_ENABLED = 'false';
+      expect(await loadSession(l.rawToken)).toBeNull();
+      expect(await prisma.session.count({ where: { userId: local.id } })).toBe(0);
+      expect((await loadSession(g.rawToken))?.user.id).toBe(google.id);
+    } finally {
+      process.env.LOCAL_LOGIN_ENABLED = saved;
+    }
+  });
+
   it('deleteSessionsOfUser 는 그 사용자 세션만 지운다', async () => {
     const a = await makeUser({ email: 'a@example.com' });
     const b = await makeUser({ email: 'b@example.com' });

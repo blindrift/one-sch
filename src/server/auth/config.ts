@@ -3,6 +3,7 @@ import NextAuth from 'next-auth';
 import Google from 'next-auth/providers/google';
 import { writeAudit } from '../audit';
 import { prisma } from '../db';
+import { log } from '../log';
 import { getRequestMeta } from '../request-meta';
 import { createOneschAdapter, type OneschAdapterUser } from './adapter';
 import { SESSION_IDLE_SECONDS, SESSION_TOUCH_SECONDS, sessionCookie } from './cookies';
@@ -19,6 +20,13 @@ async function safeMeta() {
 
 export const googleSignInGuard = createGoogleSignInGuard({
   findUserByEmail: (email) => prisma.user.findUnique({ where: { email }, select: { id: true, active: true } }),
+  findUserByAccount: async (provider, providerAccountId) => {
+    const account = await prisma.account.findUnique({
+      where: { provider_providerAccountId: { provider, providerAccountId } },
+      select: { user: { select: { id: true, active: true, email: true } } },
+    });
+    return account?.user ?? null;
+  },
   recordDenied: async ({ email, reason }) => {
     await writeAudit(prisma, {
       action: 'auth.login.denied',
@@ -66,17 +74,22 @@ export const { handlers, signIn, signOut } = NextAuth({
   events: {
     signIn: async ({ user, account }) => {
       if (!user.id) return;
-      await prisma.$transaction(async (tx) => {
-        await tx.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-        await writeAudit(tx, {
-          actorId: user.id,
-          action: 'auth.login.success',
-          entity: 'User',
-          entityId: user.id,
-          after: { provider: account?.provider ?? 'google' },
-          meta: await safeMeta(),
+      // 감사 기록이 실패해도 로그인은 이미 끝났다(세션 생성됨). 실패를 삼키지 않고 앱 로그에 남긴다.
+      try {
+        await prisma.$transaction(async (tx) => {
+          await tx.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+          await writeAudit(tx, {
+            actorId: user.id,
+            action: 'auth.login.success',
+            entity: 'User',
+            entityId: user.id,
+            after: { provider: account?.provider ?? 'google' },
+            meta: await safeMeta(),
+          });
         });
-      });
+      } catch (err) {
+        log.error('auth.login.success.audit_failed', { userId: user.id, err });
+      }
     },
     signOut: async (message) => {
       const session = 'session' in message ? message.session : null;
