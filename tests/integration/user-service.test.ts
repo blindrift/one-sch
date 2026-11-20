@@ -94,21 +94,24 @@ describe('user-service', () => {
     expect(await prisma.user.count({ where: { role: 'ADMIN', active: true } })).toBe(1);
   });
 
-  it('ADMIN 3명에서 A→B, B→C 강등이 동시에 와도 B 의 요청은 강등 뒤라 거부된다(TST-12)', async () => {
+  it('ADMIN 3명에서 A→B, B→C 강등이 동시에 와도 늦게 처리된 쪽이 강등된 요청자면 거부된다(TST-12)', async () => {
     const a = await makeUser('a@example.com', 'ADMIN');
     const b = await makeUser('b@example.com', 'ADMIN');
     const c = await makeUser('c@example.com', 'ADMIN');
-    // A 의 요청을 먼저 줄 세운 뒤 B 의 요청을 보낸다.
-    const first = users.updateUserRole(a, b.id, 'VIEWER', meta);
-    const second = users.updateUserRole(b, c.id, 'VIEWER', meta);
-    const results = [await reasonOf(first), await reasonOf(second)];
+    const [ab, bc] = await Promise.all([
+      reasonOf(users.updateUserRole(a, b.id, 'VIEWER', meta)),
+      reasonOf(users.updateUserRole(b, c.id, 'VIEWER', meta)),
+    ]);
     const roles = Object.fromEntries((await prisma.user.findMany()).map((u) => [u.email, u.role]));
-    if (results[0] === 'OK') {
-      expect(results[1]).toBe('FORBIDDEN:actor_stale');
+    // 어느 쪽이 먼저 lock 을 잡았는지는 최종 상태로 판별한다(결과 순서는 요청 순서라 판별에 못 쓴다).
+    if (roles['c@example.com'] === 'ADMIN') {
+      // A→B 가 먼저: B 는 이미 강등돼 B→C 는 거부
+      expect([ab, bc]).toEqual(['OK', 'FORBIDDEN:actor_stale']);
       expect(roles).toEqual({ 'a@example.com': 'ADMIN', 'b@example.com': 'VIEWER', 'c@example.com': 'ADMIN' });
     } else {
-      // B 의 요청이 먼저 잡힌 경우: B→C 성공 후 A→B 도 정당(A 는 여전히 ADMIN)
-      expect(results).toEqual(['OK', 'OK']);
+      // B→C 가 먼저: 그때 B 는 ADMIN 이라 정당, 이어서 A→B 도 정당
+      expect([ab, bc]).toEqual(['OK', 'OK']);
+      expect(roles).toEqual({ 'a@example.com': 'ADMIN', 'b@example.com': 'VIEWER', 'c@example.com': 'VIEWER' });
     }
     expect(await prisma.user.count({ where: { role: 'ADMIN', active: true } })).toBeGreaterThanOrEqual(1);
   });
@@ -125,7 +128,8 @@ describe('user-service', () => {
       users.unlockUser(a, t.id, meta),
       users.resetUserPassword(a, t.id, meta),
     ];
-    for (const c of calls) expect(await reasonOf(c)).toBe('FORBIDDEN:actor_stale');
+    // 모두 동시에 시작했으므로 한꺼번에 기다린다(순차 await 중 다른 거부가 처리되지 않은 채 남지 않게).
+    expect(await Promise.all(calls.map(reasonOf))).toEqual(Array(calls.length).fill('FORBIDDEN:actor_stale'));
     expect(await prisma.user.count({ where: { email: 'n@example.com' } })).toBe(0);
   });
 
