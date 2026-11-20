@@ -321,10 +321,14 @@ ALTER TABLE "TaskDependency" ADD CONSTRAINT "TaskDependency_not_self_check" CHEC
 -- Issue
 ALTER TABLE "Issue" ADD CONSTRAINT "Issue_number_check" CHECK ("number" > 0);
 
--- AuditLog append-only: 앱 역할 권한 회수 + 소유자 포함 모든 역할의 UPDATE/DELETE 를 트리거로 거부한다.
+-- 앱 역할 권한: db-init 의 기본 권한과 같은 DML 만 명시적으로 준다(기본 권한이 없는 DB 에서도 같게).
+-- AuditLog append-only: 앱 역할의 UPDATE/DELETE/TRUNCATE 를 회수하고, 소유자 포함 모든 역할의 UPDATE/DELETE 를 트리거로 거부한다.
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'onesch_app') THEN
+    GRANT USAGE ON SCHEMA public TO onesch_app;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO onesch_app;
+    GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO onesch_app;
     REVOKE UPDATE, DELETE, TRUNCATE ON "AuditLog" FROM onesch_app;
   END IF;
 END $$;

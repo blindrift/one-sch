@@ -17,7 +17,7 @@
     "test:e2e": "playwright test",
     "db:up": "docker compose --env-file .env.local -f compose.dev.yml up -d --wait",
     "db:migrate": "node scripts/with-migrate-url.mjs prisma migrate dev",
-    "db:reset": "node scripts/with-migrate-url.mjs prisma migrate reset --force",
+    "db:reset": "docker compose --env-file .env.local -f compose.dev.yml down -v && npm run db:up && node scripts/with-migrate-url.mjs prisma migrate deploy",
     "db:seed": "node scripts/with-migrate-url.mjs tsx prisma/seed.ts"
   },
   "dependencies": {
