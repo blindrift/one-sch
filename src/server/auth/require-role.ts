@@ -4,6 +4,7 @@ import type { Role as PrismaRole } from '@prisma/client';
 import { hasRole, type Role } from '@/lib/roles';
 import { AppError } from '../action-result';
 import { writeAudit } from '../audit';
+import { firstInWindow } from '../audit-throttle';
 import { prisma } from '../db';
 import { log } from '../log';
 import { getRequestMeta } from '../request-meta';
@@ -21,7 +22,12 @@ export type RequireOptions = {
 
 export const PASSWORD_CHANGE_REQUIRED = 'PASSWORD_CHANGE_REQUIRED';
 
+/** 같은 사용자·같은 요구 역할의 거부는 분당 첫 1회만 감사 로그에, 나머지는 앱 로그에 남긴다. */
 async function auditDenied(user: SessionUser, required: Role) {
+  if (!firstInWindow(`authz.denied:${user.id}:${required}`)) {
+    log.warn('authz.denied', { actorId: user.id, required, role: user.role });
+    return;
+  }
   try {
     await writeAudit(prisma, {
       actorId: user.id,

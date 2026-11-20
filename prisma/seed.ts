@@ -8,7 +8,7 @@ export const SEED_LOCK_KEY = 74_201_120; // 임의 고정값(pg_advisory_xact_lo
 export async function seed(prisma: PrismaClient): Promise<'created' | 'skipped'> {
   const passwordHash = await hashPassword('admin');
   return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${SEED_LOCK_KEY})`;
+    await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(${SEED_LOCK_KEY})`;
     if ((await tx.user.count()) > 0) return 'skipped';
     const admin = await tx.user.create({
       data: {
