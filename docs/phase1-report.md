@@ -2,16 +2,45 @@
 
 | 항목 | 내용 |
 |---|---|
-| 브랜치 | `feat/phase1-foundation` (push 전) |
+| 브랜치 | `feat/phase1-foundation` |
 | 작성일 | 2026-11-20 |
-| 판정 | **통과 보류** — 코드·단위 수준은 완료, DB·Docker 검증 미실행 |
+| 판정 | **통과 보류** — 코드·단위·운영 compose 검증 완료, 마이그레이션(개발 DB)·통합·E2E 미실행 |
 
 ## 1. 현재 상태
 
 - 구현: 설계서 12절 1단계 전체 — Next.js 골격, Prisma 스키마(설계서 5절 전 모델), 구글 SSO(허용 목록)·로컬 admin 로그인, 세션, 권한 가드, 보안 헤더·CSP, `/admin/users`, 감사 로그, Docker/compose, 백업 스크립트, 간트 PoC(`docs/gantt-poc.md`).
 - 리뷰: 보안·로직·테스트 리뷰어 3명, 수정·재검토 3회. 최종적으로 Critical·High 결함 0.
-- 확인된 것: 단위 테스트 159건(무작위 순서 포함) 통과, lint·typecheck·build 통과, 운영 의존성 `npm audit` 0건. 권한 검사 회귀 테스트는 우회 코드 29종을 넣어 모두 실패하는 것을 확인.
-- **실행하지 못한 것**: 통합 테스트(약 50건), E2E(14건), 마이그레이션 적용, DB 권한, amd64 이미지 빌드·compose 기동. 이 PC 에 Docker·Node 22 가 없었다.
+- 확인된 것: 단위 테스트 159건(무작위 순서 포함) 통과, lint·typecheck·build 통과, 운영 의존성 `npm audit` 0건. 권한 검사 회귀 테스트는 우회 코드 29종을 넣어 모두 실패하는 것을 확인. 운영 compose 검증(아래 1.2)도 통과.
+- **아직 실행하지 못한 것**: 개발 DB 마이그레이션과 통합 테스트(약 50건), E2E(14건). `.env.local` 의 `MIGRATE_DATABASE_URL` 인증 실패로 막혀 있다(1.2 참고).
+
+### 1.1 진행 내역
+
+| 일시(2026-11-20) | 내용 |
+|---|---|
+| 오전 | 기술 설계서 작성(`docs/technical-design.md`), 단계별 브랜치·로컬 환경 결정 |
+| 오후 | analyst 분석 → 사용자 결정(초기 admin/admin, 로컬 계정 admin 하나, 심각도 없음) → developer 15단계 구현(15커밋) |
+| 오후 | 리뷰 1차(SEC M3·L6 / LOG M1·L9 / TST H2·M7·L7) → 수정 F1–F27(11커밋). 사용자 결정: SEC-1 은 문서만, 접속자 IP 는 X-Real-IP |
+| 오후 | 재검토 1차: 신규 High 1(route 가드 fail-open) → 수정 G1–G11(8커밋, `withApi` 도입) |
+| 오후 | 재검토 2차: 신규 High 1(정적 검사가 `data`·`out` 폴더를 건너뜀) → 수정 H1–H10(4커밋) |
+| 오후 | 재검토 3차: 신규 결함 없음. 남은 위험 정리 → 이 보고서 작성 |
+| 저녁 | Docker(colima)·Node 22 설치, `.env.local` 작성(구글 제외). 검증 1·2·6·7단계 진행, trivy HIGH 10건 수정(`e288f61`) |
+
+### 1.2 검증 결과 (2.2 절 순서 기준)
+
+| 단계 | 결과 |
+|---|---|
+| 1. Node 22 `npm ci` | 통과. 단위 159·lint·typecheck·audit 0 |
+| 2. 개발 DB `db:up`(빈 볼륨) | 통과. 역할 3개, `onesch`·`onesch_test`·`onesch_e2e`, timezone Asia/Seoul |
+| 3. 마이그레이션 | **막힘** — Prisma P1000 `onesch_owner` 인증 실패. DB 쪽 비밀번호는 정상(컨테이너에서 세 계정 로그인 성공)이고 `.env.local` 의 `MIGRATE_DATABASE_URL` 비밀번호 부분이 다르다. 원인 후보: URL 에 `${VAR}` 참조(`process.loadEnvFile` 은 치환하지 않음), 자리표시자 그대로, 또는 셸에 같은 이름 변수가 이미 있음(덮어쓰지 않음) |
+| 4. 통합 테스트 | 미실행(3단계 대기) |
+| 5. E2E | 미실행(3단계 대기) |
+| 6. 운영 compose 리허설 | **통과** — amd64 빌드, Prisma musl·argon2 로드, db read_only+cap_add 첫 초기화 성공(R6 해소), 4개 컨테이너 ReadonlyRootfs·CapDrop ALL·no-new-privileges, db 포트 미노출, app healthy·`/api/health` 200, DB 권한(AuditLog 앱 SELECT·INSERT 만, `_prisma_migrations` 앱 권한 없음, 트리거 2개, owner TRUNCATE·DELETE 거부, 앱 CREATE TABLE 거부), 백업·`pg_restore -l`(함수·트리거·ACL 포함), db 외부 통신 차단, 보안 헤더 |
+| 6. trivy | 처음 HIGH 10건(베이스 이미지의 npm CLI 의존성) → 실행 이미지에서 npm·corepack 제거로 0건(`e288f61`) |
+| 7. SSH 터널 흉내(https `AUTH_URL` + `http://localhost`) | Chromium 성공(로그인→비밀번호 변경→`/admin/users`), **WebKit(Safari) 실패**(`upgrade-insecure-requests` 로 정적 파일을 https 로 요청). 결정: CSP 완화 없이 문서에 Chrome 필수 명시(설계서 10.2) |
+
+참고: brew 의 compose 플러그인을 docker 가 찾도록 `~/.docker/config.json` 에 `cliPluginsExtraDirs` 를 추가했다(저장소 밖 설정).
+
+다음 할 일: `.env.local` URL 5개를 실제 비밀번호로 고친 뒤 3→4→5 단계를 진행하고, 결과에 따라 판정한다.
 
 ## 2. 통과 판정을 위한 남은 작업
 
@@ -37,6 +66,8 @@ colima start --vm-type vz --vz-rosetta --cpu 4 --memory 6
 | `TEST_ADMIN_DATABASE_URL` | `postgresql://postgres:<POSTGRES_PASSWORD>@127.0.0.1:5433/onesch_test?schema=public` (테스트 DB 정리 전용. E2E 는 DB 이름을 `onesch_e2e` 로 바꿔 씀) |
 | `CLIENT_IP_HEADER` | 선택, 기본 `x-real-ip` |
 
+URL 의 `<…>` 자리에는 **실제 비밀번호 값**을 넣는다. `${APP_DB_PASSWORD}` 같은 변수 참조는 docker compose 는 치환하지만 마이그레이션 스크립트(`process.loadEnvFile`)는 치환하지 않아 인증이 실패한다. 셸에 같은 이름의 변수가 export 돼 있으면 `.env.local` 값이 무시된다.
+
 `.env.example` 에는 위 키 중 운영용(`AUTH_*`, `LOCAL_LOGIN_ENABLED`, `ENABLE_POC`, `TZ`, DB 비밀번호 4종, `APP_VERSION`, `CLIENT_IP_HEADER`)을 값 없이 둔다. 구글 OAuth 값은 비워도 앱이 뜬다.
 
 ### 2.2 검증 순서
@@ -47,7 +78,7 @@ colima start --vm-type vz --vz-rosetta --cpu 4 --memory 6
    - 특히 볼 것: 잠금 시각 시간대(`login.test` 'DB 시간대'), advisory lock 의 `$queryRaw`, AuditLog TRUNCATE 트리거와 superuser 리셋.
 5. `npm run test:e2e` (통합 테스트와 동시에 돌리지 말 것).
 6. `scripts/build-amd64.sh` → `docker compose up`: app healthy, db 포트 미노출, ReadonlyRootfs·CapDrop 적용, db 컨테이너가 read_only+cap 설정으로 첫 초기화되는지, argon2·Prisma musl 바이너리 로드, 백업 수동 실행 후 `pg_restore -l`, trivy HIGH/CRITICAL 0.
-7. SSH 터널(`ssh -L 3000:127.0.0.1:3000 <nas>`) + https `AUTH_URL` 상태에서 Chrome 으로 admin 첫 비밀번호 변경이 되는지.
+7. SSH 터널(`ssh -L 3000:127.0.0.1:3000 <nas>`) + https `AUTH_URL` 상태에서 Chrome 으로 admin 첫 비밀번호 변경이 되는지(Safari 는 불가 — 1.2 참고).
 
 배포 시 추가: DSM 리버스 프록시에 `X-Real-IP $remote_addr` 사용자 지정 머리글 설정, 위조 헤더 실측(설계서 10.2), 로그인 상태에서 구글 재로그인.
 
@@ -67,7 +98,7 @@ colima start --vm-type vz --vz-rosetta --cpu 4 --memory 6
 
 ## 4. 수용한 위험
 
-- **초기 admin/admin**: 배포 순서(프록시 공개 전 SSH 터널로 비밀번호 변경)로만 막는다. 사용자가 0명이 되면 다시 생긴다.
+- **초기 admin/admin**: 배포 순서(프록시 공개 전 SSH 터널로 비밀번호 변경)로만 막는다. 사용자가 0명이 되면 다시 생긴다. 이 절차는 Chrome 계열에서만 동작한다(Safari 불가, CSP 는 완화하지 않음).
 - **admin 잠금 공격**: 아이디가 알려져 있어 누구나 15분마다 잠글 수 있다. 구글 ADMIN 등록 후 `LOCAL_LOGIN_ENABLED=false` 로 해소.
 - **DB 연결 풀(5개) 고갈 시** 모든 로컬 로그인이 RATE_LIMITED. 앱 로그의 `*.busy` 반복을 모니터링 신호로.
 - `style-src 'unsafe-inline'` (간트 라이브러리·Next style 속성).

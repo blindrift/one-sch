@@ -474,10 +474,10 @@ export async function updateTask(input: unknown): Promise<ActionResult<TaskDto>>
 4. compose 기동: `migrate` 서비스가 `prisma migrate deploy` → 시드(사용자 없을 때만 admin 생성) 후 종료, 이어서 `app` 시작. **이 시점에는 리버스 프록시를 아직 만들지 않는다**(app 은 `127.0.0.1:3000` 에만 열려 외부에서 닿지 않는다)
 5. **프록시 공개 전 초기 계정 정리(SSH 터널)** — 기본 계정 admin/admin 이 인터넷에 노출되는 구간을 없앤다.
    1. 개발 PC 에서 `ssh -L 3000:127.0.0.1:3000 <NAS 관리자>@<NAS 주소>` 로 터널을 연다
-   2. **Chrome** 으로 `http://localhost:3000/login` → `admin` / `admin` 로그인 → 비밀번호 변경(12자 이상).
-      `AUTH_URL` 이 https 이므로 앱은 `__Secure-` 쿠키(Secure)·`upgrade-insecure-requests` 를 쓴다. Chrome 은 `http://localhost` 를
-      안전한 출처로 취급해 이 쿠키를 받아들이지만, 다른 브라우저(특히 Safari)는 거부하거나 폼 전송을 https 로 바꿔 실패할 수 있다.
-      **(미확인) Docker 검증 때 실제 https `AUTH_URL` 로 이 단계를 실측**하고, 실패하면 이 절차를 고친다
+   2. **반드시 Chrome(또는 Edge 등 Chromium 계열)** 으로 `http://localhost:3000/login` → `admin` / `admin` 로그인 → 비밀번호 변경(12자 이상).
+      `AUTH_URL` 이 https 이므로 앱은 `__Secure-` 쿠키(Secure)·`upgrade-insecure-requests` 를 쓴다. Chromium 은 `http://localhost` 를
+      안전한 출처로 취급해 동작한다. **Safari 는 동작하지 않는다** — `upgrade-insecure-requests` 때문에 정적 파일을 `https://localhost` 로
+      요청해 TLS 오류가 나고 로그인 화면이 동작하지 않는다(2026-11-20 실측: Chromium 성공, WebKit 실패. CSP 는 완화하지 않기로 결정)
    3. `/admin/users` 에서 운영자 구글 계정을 **ADMIN** 으로 등록
    4. (권장) `.env` 의 `LOCAL_LOGIN_ENABLED=false` 로 바꾸고 app 재생성 — 로컬 admin 의 남은 세션도 즉시 끊긴다
    5. 터널에서는 `AUTH_URL`(공개 https 도메인)과 주소가 달라 구글 로그인은 아직 쓰지 않는다
