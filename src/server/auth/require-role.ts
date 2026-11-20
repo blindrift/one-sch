@@ -51,6 +51,24 @@ export async function requireRole(minRole: Role, opts: RequireOptions = {}): Pro
   return user;
 }
 
+/**
+ * 모든 route handler(auth·health 제외)의 첫 문장. 통과하면 사용자, 아니면 401/403 JSON 응답을 돌려준다.
+ * 사용: `const auth = await requireApi('VIEWER'); if (auth instanceof Response) return auth;`
+ */
+export async function requireApi(minRole: Role, opts: RequireOptions = {}): Promise<SessionUser | Response> {
+  try {
+    return await requireRole(minRole, opts);
+  } catch (err) {
+    if (err instanceof AppError && (err.code === 'UNAUTHENTICATED' || err.code === 'FORBIDDEN')) {
+      return Response.json(
+        { ok: false, code: err.code, message: err.message },
+        { status: err.code === 'UNAUTHENTICATED' ? 401 : 403, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+    throw err;
+  }
+}
+
 /** 모든 page.tsx 의 첫 문장. 로그인 화면·비밀번호 변경 화면으로 보내거나 403 을 낸다. */
 export async function requirePage(minRole: Role, opts: RequireOptions = {}): Promise<SessionUser> {
   try {

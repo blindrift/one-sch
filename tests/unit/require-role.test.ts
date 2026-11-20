@@ -9,7 +9,7 @@ vi.mock('@/server/audit', () => ({ writeAudit }));
 vi.mock('@/server/db', () => ({ prisma: {} }));
 vi.mock('@/server/request-meta', () => ({ getRequestMeta: async () => ({ ip: '1.2.3.4', userAgent: null }) }));
 
-const { requirePage, requireRole, PASSWORD_CHANGE_REQUIRED } = await import('@/server/auth/require-role');
+const { requireApi, requirePage, requireRole, PASSWORD_CHANGE_REQUIRED } = await import('@/server/auth/require-role');
 const { AppError } = await import('@/server/action-result');
 
 function user(role: SessionUser['role'], extra: Partial<SessionUser> = {}): SessionUser {
@@ -101,5 +101,28 @@ describe('requirePage', () => {
   it('충족하면 사용자 반환', async () => {
     state.user = user('ADMIN');
     await expect(requirePage('ADMIN')).resolves.toMatchObject({ id: 'u1' });
+  });
+});
+
+describe('requireApi', () => {
+  it('세션 없음 → 401 JSON', async () => {
+    const r = await requireApi('VIEWER');
+    expect(r).toBeInstanceOf(Response);
+    const res = r as Response;
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({ ok: false, code: 'UNAUTHENTICATED' });
+    expect(res.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('권한 부족·비밀번호 변경 필요 → 403 JSON', async () => {
+    state.user = user('VIEWER');
+    expect(((await requireApi('ADMIN')) as Response).status).toBe(403);
+    state.user = user('ADMIN', { mustChangePassword: true });
+    expect(((await requireApi('VIEWER')) as Response).status).toBe(403);
+  });
+
+  it('충족하면 사용자', async () => {
+    state.user = user('MEMBER');
+    expect(await requireApi('MEMBER')).toMatchObject({ id: 'u1' });
   });
 });
