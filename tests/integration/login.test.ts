@@ -1,7 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { prisma } from '@/server/db';
 import { hashPassword, verifyPassword } from '@/server/auth/password';
-import { checkIpRate, IP_LIMIT, recordFailure } from '@/server/auth/login-guard';
+import { checkIpRate, IP_LIMIT, lockUser, reserveAttempt } from '@/server/auth/login-guard';
+import { resetAuditThrottle } from '@/server/audit-throttle';
 import { loadSession } from '@/server/auth/session';
 import { changeOwnPassword, passwordLogin } from '@/server/services/auth-service';
 import { ownerDb, resetDb } from '../helpers/db';
@@ -23,7 +24,10 @@ async function makeAdmin(password = 'admin', extra: { mustChangePassword?: boole
   });
 }
 
-beforeEach(resetDb);
+beforeEach(async () => {
+  await resetDb();
+  resetAuditThrottle();
+});
 afterAll(async () => {
   await prisma.$disconnect();
   await ownerDb.$disconnect();
@@ -45,22 +49,32 @@ describe('checkIpRate', () => {
   });
 });
 
-describe('recordFailure', () => {
-  it('5번째 실패에서 15분 잠그고 횟수를 0 으로', async () => {
+describe('DB 시간대', () => {
+  it('통합 DB 세션 TimeZone 이 UTC 가 아니다(운영 TZ=Asia/Seoul 과 같은 조건에서 시각 파라미터를 검증)', async () => {
+    const [row] = await prisma.$queryRaw<Array<{ tz: string }>>`SELECT current_setting('TimeZone') AS tz`;
+    expect(row.tz).not.toMatch(/^(UTC|Etc\/UTC|GMT)$/);
+  });
+});
+
+describe('reserveAttempt·lockUser', () => {
+  it('검증 전에 실패 횟수를 원자적으로 올리고, 잠긴 동안은 null', async () => {
     const u = await makeAdmin();
     const now = new Date('2026-01-01T00:00:00Z');
-    for (let i = 1; i <= 4; i++) expect(await recordFailure(u.id, now)).toBe(false);
-    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).failedLogins).toBe(4);
-    expect(await recordFailure(u.id, now)).toBe(true);
+    for (let i = 1; i <= 5; i++) expect(await reserveAttempt(u.id, now)).toBe(i);
+    const lockedUntil = await lockUser(u.id, now);
+    expect(lockedUntil.getTime()).toBe(now.getTime() + 15 * 60 * 1000);
     const after = await prisma.user.findUniqueOrThrow({ where: { id: u.id } });
     expect(after.failedLogins).toBe(0);
-    expect(after.lockedUntil?.getTime()).toBe(now.getTime() + 15 * 60 * 1000);
+    // 시간대와 무관하게 절대 시각이 그대로 저장된다(TST-7)
+    expect(after.lockedUntil?.getTime()).toBe(lockedUntil.getTime());
+    expect(await reserveAttempt(u.id, new Date(now.getTime() + 60_000))).toBeNull();
+    expect(await reserveAttempt(u.id, new Date(lockedUntil.getTime() + 1))).toBe(1);
   });
 
-  it('병렬 실패도 정확히 센다', async () => {
+  it('병렬 예약도 정확히 센다', async () => {
     const u = await makeAdmin();
-    await Promise.all(Array.from({ length: 4 }, () => recordFailure(u.id)));
-    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).failedLogins).toBe(4);
+    const results = await Promise.all(Array.from({ length: 4 }, () => reserveAttempt(u.id)));
+    expect(results.sort()).toEqual([1, 2, 3, 4]);
   });
 });
 
@@ -119,6 +133,31 @@ describe('passwordLogin', () => {
       ok: false,
       reason: 'rate_limited',
     });
+    // 계속 두드려도 감사 로그에는 IP·분 단위 첫 1회만(SEC-2)
+    for (let i = 0; i < 5; i++) await passwordLogin({ username: 'admin', password: 'admin', meta: meta(ip) });
+    expect(await prisma.auditLog.count({ where: { action: 'auth.login.rate_limited' } })).toBe(1);
+  });
+
+  it('동시에 오답을 몰아 보내도 잠금 창마다 실제 검증은 5회뿐(SEC-8)', async () => {
+    const u = await makeAdmin();
+    const results = await Promise.all(
+      Array.from({ length: 9 }, (_, i) => passwordLogin({ username: 'admin', password: `wrong-${i}`, meta: meta() })),
+    );
+    expect(results.every((r) => !r.ok)).toBe(true);
+    expect(await prisma.auditLog.count({ where: { action: 'auth.login.failure', entityId: u.id } })).toBe(5);
+    expect(await prisma.auditLog.count({ where: { action: 'auth.login.locked', entityId: u.id } })).toBe(4);
+    const after = await prisma.user.findUniqueOrThrow({ where: { id: u.id } });
+    expect(after.lockedUntil!.getTime()).toBeGreaterThan(Date.now() + 14 * 60 * 1000);
+  });
+
+  it('실패 감사에는 등록된 아이디만 원문, 아니면 길이만(SEC-6)', async () => {
+    await makeAdmin();
+    await passwordLogin({ username: 'my-secret-password', password: 'x', meta: meta() });
+    await passwordLogin({ username: 'admin', password: 'wrong', meta: meta() });
+    const logs = await prisma.auditLog.findMany({ where: { action: 'auth.login.failure' }, orderBy: { id: 'asc' } });
+    expect(logs[0].after).toEqual({ usernameKnown: false, usernameLength: 18 });
+    expect(JSON.stringify(logs[0])).not.toContain('my-secret-password');
+    expect(logs[1].after).toEqual({ username: 'admin' });
   });
 });
 
@@ -144,6 +183,35 @@ describe('changeOwnPassword', () => {
     const r = await changeOwnPassword({ userId: u.id, sessionId, currentPassword: 'x', newPassword: 'correct-horse-9', meta: meta() });
     expect(r).toEqual({ ok: false, reason: 'invalid_current' });
     expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).failedLogins).toBe(1);
+  });
+
+  it('현재 비밀번호 5회 오답이면 잠기고, 잠긴 동안은 맞는 비밀번호도 거부', async () => {
+    const { u, sessionId } = await loggedIn();
+    for (let i = 0; i < 5; i++) {
+      const r = await changeOwnPassword({ userId: u.id, sessionId, currentPassword: `x${i}`, newPassword: 'correct-horse-9', meta: meta() });
+      expect(r).toEqual({ ok: false, reason: 'invalid_current' });
+    }
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).lockedUntil).not.toBeNull();
+    expect(await prisma.auditLog.count({ where: { action: 'auth.lock', entityId: u.id } })).toBe(1);
+    const r = await changeOwnPassword({ userId: u.id, sessionId, currentPassword: 'admin', newPassword: 'correct-horse-9', meta: meta() });
+    expect(r).toEqual({ ok: false, reason: 'invalid_current' });
+  });
+
+  it('IP 한도 초과면 rate_limited, 감사는 1회', async () => {
+    const { u, sessionId } = await loggedIn();
+    const ip = freshIp();
+    for (let i = 0; i < IP_LIMIT; i++) await checkIpRate(ip);
+    for (let i = 0; i < 3; i++) {
+      const r = await changeOwnPassword({ userId: u.id, sessionId, currentPassword: 'admin', newPassword: 'correct-horse-9', meta: meta(ip) });
+      expect(r).toEqual({ ok: false, reason: 'rate_limited' });
+    }
+    expect(await prisma.auditLog.count({ where: { action: 'auth.password.rate_limited' } })).toBe(1);
+  });
+
+  it('정책 위반이면 현재 비밀번호는 맞았으므로 실패 횟수를 되돌린다', async () => {
+    const { u, sessionId } = await loggedIn();
+    await changeOwnPassword({ userId: u.id, sessionId, currentPassword: 'admin', newPassword: 'short', meta: meta() });
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).failedLogins).toBe(0);
   });
 
   it('성공하면 강제 변경 해제, 다른 세션 삭제, 현재 세션 유지', async () => {

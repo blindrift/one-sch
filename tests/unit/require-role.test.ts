@@ -11,6 +11,7 @@ vi.mock('@/server/request-meta', () => ({ getRequestMeta: async () => ({ ip: '1.
 
 const { requireApi, requirePage, requireRole, PASSWORD_CHANGE_REQUIRED } = await import('@/server/auth/require-role');
 const { AppError } = await import('@/server/action-result');
+const { resetAuditThrottle } = await import('@/server/audit-throttle');
 
 function user(role: SessionUser['role'], extra: Partial<SessionUser> = {}): SessionUser {
   return {
@@ -49,6 +50,7 @@ async function digestOf(p: Promise<unknown>) {
 beforeEach(() => {
   state.user = null;
   writeAudit.mockClear();
+  resetAuditThrottle();
 });
 
 describe('requireRole', () => {
@@ -74,6 +76,27 @@ describe('requireRole', () => {
       {},
       expect.objectContaining({ actorId: 'u1', action: 'authz.denied', after: { required: 'ADMIN', role: 'VIEWER' } }),
     );
+  });
+
+  it('같은 사용자의 반복 거부는 분당 1회만 감사, 세션 없음은 감사하지 않음', async () => {
+    await codeOf(requireRole('ADMIN'));
+    expect(writeAudit).not.toHaveBeenCalled();
+    state.user = user('VIEWER');
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    for (let i = 0; i < 5; i++) await codeOf(requireRole('ADMIN'));
+    spy.mockRestore();
+    expect(writeAudit).toHaveBeenCalledTimes(1);
+    // 요구 역할이 다르면 따로 센다
+    await codeOf(requireRole('MEMBER'));
+    expect(writeAudit).toHaveBeenCalledTimes(2);
+  });
+
+  it('감사 기록이 실패해도 FORBIDDEN 으로 끝난다', async () => {
+    state.user = user('VIEWER');
+    writeAudit.mockRejectedValueOnce(new Error('db down'));
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    expect(await codeOf(requireRole('ADMIN'))).toBe('FORBIDDEN');
+    spy.mockRestore();
   });
 
   it('비밀번호 변경 필요 시 ADMIN 이라도 거부, allowPasswordChange 면 허용', async () => {

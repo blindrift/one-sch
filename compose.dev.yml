@@ -15,7 +15,8 @@ services:
       EXTRA_DATABASES: onesch_test
       OWNER_CREATEDB: "true"
       TZ: Asia/Seoul
-    command: ["postgres", "-c", "password_encryption=scram-sha-256"]
+    # 운영(TZ=Asia/Seoul 로 initdb)과 같이 UTC 가 아닌 시간대로 둬 시각 파라미터 처리를 같은 조건에서 시험한다.
+    command: ["postgres", "-c", "password_encryption=scram-sha-256", "-c", "timezone=Asia/Seoul"]
     ports: ["127.0.0.1:5433:5432"]
     volumes:
       - dev-pgdata:/var/lib/postgresql/data
