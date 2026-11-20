@@ -31,9 +31,13 @@ function idleExpiry(now: Date, createdAt: Date): Date {
 
 export async function createSession(
   db: Tx | PrismaClient,
-  input: { userId: string; ip?: string | null; userAgent?: string | null; rawToken?: string; now?: Date },
+  input: { userId: string; ip?: string | null; userAgent?: string | null; rawToken?: string; now?: Date; random?: () => number },
 ): Promise<{ rawToken: string; expires: Date }> {
   const now = input.now ?? new Date();
+  // 로그인 때 가끔(5%) 만료된 세션 행을 정리한다(만료 세션은 이미 무효지만 테이블·세션 수 표시가 부풀지 않게).
+  if ((input.random ?? Math.random)() < 0.05) {
+    await db.session.deleteMany({ where: { expires: { lt: now } } });
+  }
   const rawToken = input.rawToken ?? newRawToken();
   const expires = idleExpiry(now, now);
   await db.session.create({

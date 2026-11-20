@@ -52,27 +52,76 @@ describe('user-service', () => {
     expect(log.after).toEqual({ role: 'MEMBER', revokedSessions: 1 });
   });
 
-  it('마지막 활성 ADMIN 은 강등·비활성화할 수 없다', async () => {
+  it('자기 역할은 바꿀 수 없다(본인 강등으로 활성 ADMIN 0명이 되는 경로 차단)', async () => {
     const admin = await makeUser('admin@example.com', 'ADMIN');
-    const other = await makeUser('other@example.com', 'ADMIN');
-    await prisma.user.update({ where: { id: other.id }, data: { active: false } });
-    expect(await reasonOf(users.updateUserRole(admin, admin.id, 'MEMBER', meta))).toBe('CONFLICT:last_admin');
-    // 다른 활성 ADMIN 이 있으면 가능
-    await prisma.user.update({ where: { id: other.id }, data: { active: true } });
-    expect(await reasonOf(users.updateUserRole(admin, admin.id, 'MEMBER', meta))).toBe('OK');
-    // 이제 other 가 마지막
-    expect(await reasonOf(users.setUserActive(admin, other.id, false, meta))).toBe('CONFLICT:last_admin');
+    expect(await reasonOf(users.updateUserRole(admin, admin.id, 'MEMBER', meta))).toBe('CONFLICT:self');
+    expect(await reasonOf(users.setUserActive(admin, admin.id, false, meta))).toBe('CONFLICT:self');
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: admin.id } })).role).toBe('ADMIN');
   });
 
-  it('동시에 서로를 강등해도 ADMIN 이 0명이 되지 않는다', async () => {
+  it('다른 활성 ADMIN 은 강등·비활성화할 수 있고, 남은 1명은 자기 자신이라 막힌다', async () => {
+    const a = await makeUser('a@example.com', 'ADMIN');
+    const b = await makeUser('b@example.com', 'ADMIN');
+    expect(await reasonOf(users.updateUserRole(a, b.id, 'MEMBER', meta))).toBe('OK');
+    expect(await prisma.user.count({ where: { role: 'ADMIN', active: true } })).toBe(1);
+    expect(await reasonOf(users.updateUserRole(a, a.id, 'MEMBER', meta))).toBe('CONFLICT:self');
+  });
+
+  it('동시에 서로를 강등하면 먼저 처리된 쪽만 성공하고, 늦은 쪽은 이미 강등된 요청자라 거부된다', async () => {
     const a = await makeUser('a@example.com', 'ADMIN');
     const b = await makeUser('b@example.com', 'ADMIN');
     const results = await Promise.all([
       reasonOf(users.updateUserRole(a, b.id, 'VIEWER', meta)),
       reasonOf(users.updateUserRole(b, a.id, 'VIEWER', meta)),
     ]);
-    expect(results.sort()).toEqual(['CONFLICT:last_admin', 'OK']);
+    expect(results.sort()).toEqual(['FORBIDDEN:actor_stale', 'OK']);
     expect(await prisma.user.count({ where: { role: 'ADMIN', active: true } })).toBe(1);
+  });
+
+  it('ADMIN 3명에서 A→B, B→C 강등이 동시에 와도 B 의 요청은 강등 뒤라 거부된다(TST-12)', async () => {
+    const a = await makeUser('a@example.com', 'ADMIN');
+    const b = await makeUser('b@example.com', 'ADMIN');
+    const c = await makeUser('c@example.com', 'ADMIN');
+    // A 의 요청을 먼저 줄 세운 뒤 B 의 요청을 보낸다.
+    const first = users.updateUserRole(a, b.id, 'VIEWER', meta);
+    const second = users.updateUserRole(b, c.id, 'VIEWER', meta);
+    const results = [await reasonOf(first), await reasonOf(second)];
+    const roles = Object.fromEntries((await prisma.user.findMany()).map((u) => [u.email, u.role]));
+    if (results[0] === 'OK') {
+      expect(results[1]).toBe('FORBIDDEN:actor_stale');
+      expect(roles).toEqual({ 'a@example.com': 'ADMIN', 'b@example.com': 'VIEWER', 'c@example.com': 'ADMIN' });
+    } else {
+      // B 의 요청이 먼저 잡힌 경우: B→C 성공 후 A→B 도 정당(A 는 여전히 ADMIN)
+      expect(results).toEqual(['OK', 'OK']);
+    }
+    expect(await prisma.user.count({ where: { role: 'ADMIN', active: true } })).toBeGreaterThanOrEqual(1);
+  });
+
+  it('비활성화되거나 강등된 요청자의 모든 관리 작업은 FORBIDDEN(actor_stale)', async () => {
+    const a = await makeUser('a@example.com', 'ADMIN');
+    const t = await makeUser('t@example.com');
+    await prisma.user.update({ where: { id: a.id }, data: { role: 'MEMBER' } });
+    const calls = [
+      users.createUser(a, { email: 'n@example.com', name: 'n', role: 'VIEWER' }, meta),
+      users.updateUserRole(a, t.id, 'MEMBER', meta),
+      users.setUserActive(a, t.id, false, meta),
+      users.revokeUserSessions(a, t.id, meta),
+      users.unlockUser(a, t.id, meta),
+      users.resetUserPassword(a, t.id, meta),
+    ];
+    for (const c of calls) expect(await reasonOf(c)).toBe('FORBIDDEN:actor_stale');
+    expect(await prisma.user.count({ where: { email: 'n@example.com' } })).toBe(0);
+  });
+
+  it('세션 수는 만료되지 않은 세션만 센다', async () => {
+    const t = await makeUser('t@example.com');
+    await createSession(prisma, { userId: t.id, random: () => 1 });
+    await createSession(prisma, { userId: t.id, now: new Date(Date.now() - 9 * 60 * 60 * 1000), random: () => 1 });
+    const row = (await users.listUsers()).find((u) => u.id === t.id)!;
+    expect(row.sessionCount).toBe(1);
+    // 정리가 돌면 만료 세션 행이 지워진다
+    await createSession(prisma, { userId: t.id, random: () => 0 });
+    expect(await prisma.session.count({ where: { userId: t.id } })).toBe(2);
   });
 
   it('자기 자신은 비활성화할 수 없다', async () => {
