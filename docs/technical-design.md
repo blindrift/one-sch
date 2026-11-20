@@ -385,7 +385,7 @@ sequenceDiagram
 | DB 직접 접근 | 호스트 포트 미공개, `internal` 네트워크, 앱 전용 DB 계정(최소 권한), superuser 는 마이그레이션에만 |
 | 컨테이너 탈출·변조 | non-root, read-only rootfs, `cap_drop: ALL`, `no-new-privileges`, 메모리·PID 제한 |
 | 공급망 | lockfile 고정, 베이스 이미지 다이제스트 고정, `npm audit`·`trivy image` 빌드 시 실행 |
-| 프록시 헤더 오용 | `AUTH_URL` 공개 도메인 고정, 프록시 신뢰는 `127.0.0.1` 에서 온 `X-Forwarded-*` 만 |
+| 프록시 헤더 오용 | `AUTH_URL` 공개 도메인 고정. 클라이언트 IP 는 프록시가 **덮어쓰는** 단일 헤더(`CLIENT_IP_HEADER`, 기본 `X-Real-IP`) 하나만 신뢰하고 IP 형식을 검증한다. 클라이언트가 보낸 값을 덧붙이는 `X-Forwarded-For` 는 쓰지 않는다. 헤더가 없으면 `unknown`(모든 요청이 한 IP 로 묶여 전역 제한이 됨)으로 처리하고 경고 로그를 남긴다(10.2 실측 절차) |
 | 데이터 유실 | 일 1회 pg_dump, 7일 보관, Hyper Backup 외부 복제, 분기별 복구 리허설 |
 
 ### 8.2 OWASP Top 10 (2021) 매핑
@@ -459,26 +459,39 @@ export async function updateTask(input: unknown): Promise<ActionResult<TaskDto>>
 | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | Google Cloud OAuth 클라이언트 |
 | `DATABASE_URL` | 앱 전용 계정 접속 문자열 (내부 호스트 `db`) |
 | `POSTGRES_PASSWORD` | db 컨테이너 superuser |
-| `LOCAL_LOGIN_ENABLED` | `true`/`false` |
+| `LOCAL_LOGIN_ENABLED` | `true`/`false`. `false` 면 로컬 전용 계정(admin)의 남은 세션도 즉시 무효 |
+| `CLIENT_IP_HEADER` | (선택) 클라이언트 IP 헤더 이름, 기본 `x-real-ip`. 프록시가 덮어쓰는 헤더만 지정 |
+| `APP_DB_PASSWORD`, `MIGRATOR_DB_PASSWORD`, `BACKUP_DB_PASSWORD` | DB 역할별 비밀번호(`openssl rand -hex 24`) |
+| `ENABLE_POC` | (선택) 간트 PoC 화면, 기본 `false` |
 | `TZ` | `Asia/Seoul` |
 
 저장소에는 값 없는 `.env.example` 만 둔다.
 
 ### 10.2 빌드·배포 절차
-1. 개발 PC 에서 `scripts/build-amd64.sh` → `docker buildx build --platform linux/amd64` → `trivy image` 검사 → `docker save` 로 tar 생성
+1. 개발 PC 에서 `scripts/build-amd64.sh` → `docker buildx build --platform linux/amd64` → Prisma musl 엔진·argon2 musl 바이너리 포함 확인 → `trivy image` 검사 → `docker save` 로 tar 생성
 2. NAS 에 업로드 → Container Manager > 이미지 > 가져오기 (또는 NAS 에서 저장소를 받아 직접 빌드)
 3. Container Manager > 프로젝트에 `docker-compose.yml` 등록, `.env` 배치(권한 600)
-4. 첫 기동 시 app 엔트리포인트가 `prisma migrate deploy` → 시드(사용자 없을 때만 admin 생성) → 서버 시작
-5. DSM 제어판 > 로그인 포털 > 리버스 프록시: `https://<도메인>:443 → http://127.0.0.1:3000`, HSTS 사용, 인증서는 Let's Encrypt
-6. Google Cloud 콘솔에서 OAuth 클라이언트 생성, 승인된 리디렉션 URI `https://<도메인>/api/auth/callback/google`
-7. admin/admin 로그인 → 비밀번호 변경 → 구글 계정 사용자 등록 → (권장) 로컬 로그인 끄기
+4. compose 기동: `migrate` 서비스가 `prisma migrate deploy` → 시드(사용자 없을 때만 admin 생성) 후 종료, 이어서 `app` 시작. **이 시점에는 리버스 프록시를 아직 만들지 않는다**(app 은 `127.0.0.1:3000` 에만 열려 외부에서 닿지 않는다)
+5. **프록시 공개 전 초기 계정 정리(SSH 터널)** — 기본 계정 admin/admin 이 인터넷에 노출되는 구간을 없앤다.
+   1. 개발 PC 에서 `ssh -L 3000:127.0.0.1:3000 <NAS 관리자>@<NAS 주소>` 로 터널을 연다
+   2. 브라우저로 `http://localhost:3000/login` → `admin` / `admin` 로그인 → 비밀번호 변경(12자 이상)
+   3. `/admin/users` 에서 운영자 구글 계정을 **ADMIN** 으로 등록
+   4. (권장) `.env` 의 `LOCAL_LOGIN_ENABLED=false` 로 바꾸고 app 재생성 — 로컬 admin 의 남은 세션도 즉시 끊긴다
+   5. 터널에서는 `AUTH_URL`(공개 https 도메인)과 주소가 달라 구글 로그인은 아직 쓰지 않는다
+6. DSM 제어판 > 로그인 포털 > 리버스 프록시: `https://<도메인>:443 → http://127.0.0.1:3000`, HSTS 사용, 인증서는 Let's Encrypt.
+   **사용자 지정 머리글**에 `X-Real-IP` = `$remote_addr` 를 추가한다(프록시가 이 헤더를 덮어쓰므로 클라이언트가 위조할 수 없다)
+7. 클라이언트 IP 실측: 외부(휴대폰 LTE 등)에서 틀린 비밀번호로 한 번 로그인 → `/admin/users` 가 아니라 DB 감사 로그(`AuditLog.ip`) 또는 app 로그에서 그 외부 IP 가 찍히는지 확인. `unknown` 이거나 공유기·게이트웨이 주소면 6 의 머리글 설정을 다시 본다(app 로그 `request_meta.client_ip_missing` 경고도 같은 신호)
+8. Google Cloud 콘솔에서 OAuth 클라이언트 생성, 승인된 리디렉션 URI `https://<도메인>/api/auth/callback/google`
+9. 등록한 구글 ADMIN 계정으로 로그인 확인
+
+정적 자산(`/_next/static`)의 HSTS 는 DSM 리버스 프록시가 붙이고, 페이지·API 응답은 middleware 가 `AUTH_URL` 이 https 일 때 붙인다(Next 의 `headers()` 설정은 빌드 시점 값이라 HSTS 를 두지 않는다).
 
 자세한 절차는 `docs/deploy-synology.md` 로 따로 작성한다.
 
 ### 10.3 백업·복구
-- backup 컨테이너가 매일 03:00 `pg_dump -Fc` → `backups/one-sch-YYYYMMDD.dump`, 7일 초과 파일 삭제
-- `backups/` 폴더를 Hyper Backup 으로 외부(다른 NAS·클라우드)에 복제
-- 복구: `scripts/restore.sh <dump>` → 새 DB 에 `pg_restore` → app 재시작. 분기 1회 리허설
+- backup 컨테이너가 매일 03:00 `pg_dump -Fc` → `backups/one-sch-YYYYMMDD.dump`(권한 600), 7일 초과 파일 삭제
+- `backups/` 폴더를 Hyper Backup 으로 외부(다른 NAS·클라우드)에 복제한다. **덤프는 평문**(사용자·세션 해시·감사 로그 포함)이므로 Hyper Backup 작업에서 **클라이언트 측 암호화**를 켜고, 암호화 비밀번호는 NAS 밖(비밀번호 관리자)에 보관한다
+- 복구: `scripts/restore.sh <dump>` → 새 DB 에 `pg_restore` → 전환 → app 재시작. 분기 1회 리허설
 
 ### 10.4 로그·모니터링
 - 앱 로그는 JSON 한 줄 형식으로 stdout (Container Manager 에서 조회), 비밀번호·토큰·쿠키 필드 마스킹
@@ -490,6 +503,16 @@ export async function updateTask(input: unknown): Promise<ActionResult<TaskDto>>
 - 롤백: 이전 이미지 태그로 되돌리고, 스키마가 바뀐 경우 직전 백업으로 복구
 
 ---
+
+### 10.6 감사 로그 보관·정리
+- AuditLog 는 앱 역할(onesch_app)이 고치거나 지울 수 없다(UPDATE·DELETE·TRUNCATE 권한 회수 + 트리거). 반복 사건(로그인 한도 초과, 권한 거부)은 IP·사용자 단위로 분당 첫 1회만 감사 로그에 남기고 나머지는 앱 로그(stdout)로 보낸다.
+- 보관 기간은 **1년**을 기본으로 한다. 정리는 분기 1회 운영자가 수동으로 한다:
+  1. 백업이 최신인지 확인(정리 전 덤프 보관)
+  2. db 컨테이너에서 superuser 로 접속: `docker compose exec db psql -U postgres -d onesch`
+  3. 한 트랜잭션에서 트리거를 끄고 지운다:
+     `BEGIN; SET LOCAL session_replication_role = replica; DELETE FROM "AuditLog" WHERE "at" < now() - interval '1 year'; COMMIT;`
+  4. 지운 건수와 기간을 운영 기록에 남긴다
+- 트리거를 끄는 권한은 superuser·소유자에게만 있다. append-only 는 앱 역할에 대한 보장이다.
 
 ## 11. 테스트·검증 전략
 
@@ -531,3 +554,5 @@ export async function updateTask(input: unknown): Promise<ActionResult<TaskDto>>
 | 알림 | 마감 임박·담당 지정 알림(메일·두레이 등) | MVP 이후 |
 | 위험: NAS 단일 장애점 | NAS 고장 시 서비스 중단 | 외부 백업 + 복구 리허설로 완화 |
 | 위험: 인터넷 공개 | 노출면 존재 | 허용 목록 로그인, 하드닝, (선택) DSM 방화벽 국가 제한·자동 차단 |
+| 수용 위험: 초기 admin/admin (SEC-1) | 사용자가 0명인 DB 에서 시드가 admin/admin 을 만든다. 10.2 의 순서(프록시 공개 전 SSH 터널로 변경)를 지키면 노출 구간이 없다. 운영 중 사용자가 0명이 되는 경우(전원 삭제 등)에는 다음 migrate 실행 때 다시 생기므로, 그때도 프록시를 먼저 내리고 같은 절차를 따른다. 코드 제한(사설 IP 에서만 로그인 등)은 두지 않기로 결정(2026-11-20) | 배포 시 |
+| 수용 위험: admin 잠금 공격 (SEC-9) | 로컬 아이디 `admin` 은 알려져 있어, 누구나 15분마다 5회 틀려 admin 을 계속 잠글 수 있다(구글 로그인은 영향 없음). `LOCAL_LOGIN_ENABLED=false` 로 해소된다(권장 운영) | 운영 시작 시 |

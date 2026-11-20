@@ -18,9 +18,12 @@ for target in runner migrate; do
     -t "${name}:${VERSION}" -t "${name}:latest" --load .
 done
 
-# Prisma 엔진(musl)이 standalone 에 들어갔는지 확인
+# 네이티브 바이너리가 standalone 에 들어갔고 실제로 로드되는지 확인(Prisma 엔진·argon2 모두 musl)
 docker run --rm --platform linux/amd64 --entrypoint sh "one-sch-app:${VERSION}" \
   -c 'ls node_modules/.prisma/client/ | grep -q musl' || { echo "Prisma musl 엔진이 없습니다" >&2; exit 1; }
+docker run --rm --platform linux/amd64 --entrypoint node "one-sch-app:${VERSION}" \
+  -e "require('@node-rs/argon2').hash('x').then(h=>{if(!h.startsWith('\$argon2'))process.exit(1)})" \
+  || { echo "@node-rs/argon2 linux-x64-musl 바이너리를 불러오지 못했습니다" >&2; exit 1; }
 
 if command -v trivy >/dev/null 2>&1; then
   for name in one-sch-app one-sch-migrate; do
