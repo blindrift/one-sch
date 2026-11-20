@@ -65,6 +65,8 @@ services:
       AUTH_GOOGLE_ID: ${AUTH_GOOGLE_ID:-}
       AUTH_GOOGLE_SECRET: ${AUTH_GOOGLE_SECRET:-}
       LOCAL_LOGIN_ENABLED: ${LOCAL_LOGIN_ENABLED:-true}
+      # DSM 리버스 프록시가 덮어쓰는 클라이언트 IP 헤더(설계서 10.2)
+      CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-x-real-ip}
       ENABLE_POC: ${ENABLE_POC:-false}
       TZ: Asia/Seoul
     ports: ["127.0.0.1:3000:3000"]
