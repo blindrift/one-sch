@@ -2,7 +2,8 @@ import 'server-only';
 import { forbidden, redirect } from 'next/navigation';
 import type { Role as PrismaRole } from '@prisma/client';
 import { hasRole, type Role } from '@/lib/roles';
-import { AppError } from '../action-result';
+import { ZodError } from 'zod';
+import { AppError, type ErrorCode } from '../action-result';
 import { writeAudit } from '../audit';
 import { firstInWindow } from '../audit-throttle';
 import { prisma } from '../db';
@@ -57,10 +58,38 @@ export async function requireRole(minRole: Role, opts: RequireOptions = {}): Pro
   return user;
 }
 
+const STATUS: Record<ErrorCode, number> = {
+  VALIDATION: 400,
+  UNAUTHENTICATED: 401,
+  FORBIDDEN: 403,
+  NOT_FOUND: 404,
+  CONFLICT: 409,
+  RATE_LIMITED: 429,
+  INTERNAL: 500,
+};
+
+/** AppError·ZodError 를 JSON 응답으로. INTERNAL 은 상세 없이 일반 문구만. */
+function errorResponse(err: AppError | ZodError): Response {
+  const headers = { 'Cache-Control': 'no-store' };
+  if (err instanceof ZodError) {
+    const fieldErrors: Record<string, string[]> = {};
+    for (const issue of err.issues) (fieldErrors[issue.path.join('.') || '_'] ??= []).push(issue.message);
+    const message = new AppError('VALIDATION').message;
+    return Response.json({ ok: false, code: 'VALIDATION', message, fieldErrors }, { status: 400, headers });
+  }
+  const message = err.code === 'INTERNAL' ? new AppError('INTERNAL').message : err.message;
+  const body =
+    err.fieldErrors && err.code !== 'INTERNAL'
+      ? { ok: false, code: err.code, message, fieldErrors: err.fieldErrors }
+      : { ok: false, code: err.code, message };
+  return Response.json(body, { status: STATUS[err.code], headers });
+}
+
 /**
  * route handler 를 감싸는 유일한 방법. 권한 검사를 통과해야만 handler 가 실행된다(fail-closed).
  * 사용: `export const GET = withApi('VIEWER', async (req, ctx, user) => Response.json(...));`
- * 세션 없음 → 401, 권한 부족·비밀번호 변경 필요 → 403 JSON(no-store). 그 밖의 오류는 그대로 던진다.
+ * 세션 없음 → 401, 권한 부족·비밀번호 변경 필요 → 403 JSON(no-store).
+ * handler 가 던진 AppError·ZodError 는 400/401/403/404/409/429/500 으로 바꾸고, 그 밖의 오류는 그대로 던진다(Next 가 500).
  * handler 결과를 받지 않고 검사만 하는 형태가 없으므로 "검사 결과를 버리는" 실수가 구조적으로 불가능하다.
  */
 export function withApi<Ctx = unknown>(
@@ -73,15 +102,18 @@ export function withApi<Ctx = unknown>(
     try {
       user = await requireRole(minRole, opts);
     } catch (err) {
-      if (err instanceof AppError && (err.code === 'UNAUTHENTICATED' || err.code === 'FORBIDDEN')) {
-        return Response.json(
-          { ok: false, code: err.code, message: err.message },
-          { status: err.code === 'UNAUTHENTICATED' ? 401 : 403, headers: { 'Cache-Control': 'no-store' } },
-        );
+      if (err instanceof AppError) return errorResponse(err);
+      throw err;
+    }
+    try {
+      return await handler(req, ctx, user);
+    } catch (err) {
+      if (err instanceof AppError || err instanceof ZodError) {
+        if (err instanceof AppError && err.code === 'INTERNAL') log.error('api.internal_error', { err });
+        return errorResponse(err);
       }
       throw err;
     }
-    return handler(req, ctx, user);
   };
 }
 
