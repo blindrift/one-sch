@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { ancestorsOf, createsCycle, depthOf, isAncestor, subtreeHeight, type Edge } from '@/lib/schedule/graph';
+import {
+  ancestorsOf,
+  createsCycle,
+  depthOf,
+  isAncestor,
+  moveCreatesHierarchyDependency,
+  subtreeDependencyPartners,
+  subtreeHeight,
+  type Edge,
+} from '@/lib/schedule/graph';
 
 describe('createsCycle', () => {
   const edges: Edge[] = [
@@ -62,5 +71,44 @@ describe('계층', () => {
     ]);
     expect(subtreeHeight(children, 'r')).toBe(3);
     expect(subtreeHeight(children, 'b')).toBe(1);
+  });
+});
+
+describe('계층 변경과 의존(D14, L-1)', () => {
+  // g > p > {a > a1, b},  x(최상위)
+  const parentOf = new Map<string, string | null>([
+    ['g', null],
+    ['p', 'g'],
+    ['a', 'p'],
+    ['a1', 'a'],
+    ['b', 'p'],
+    ['x', null],
+  ]);
+  it('형제 a→b 의존이 있으면 b 를 a 밑으로 옮길 수 없다(양방향)', () => {
+    expect(moveCreatesHierarchyDependency(parentOf, [{ from: 'a', to: 'b' }], 'b', 'a')).toBe(true);
+    expect(moveCreatesHierarchyDependency(parentOf, [{ from: 'b', to: 'a' }], 'b', 'a')).toBe(true);
+  });
+  it('하위 트리의 후손과 새 상위의 조상 사이 의존도 거부', () => {
+    // a1(a 의 후손) → x, a 를 x 밑으로
+    expect(moveCreatesHierarchyDependency(parentOf, [{ from: 'a1', to: 'x' }], 'a', 'x')).toBe(true);
+    // b → x 의존이 있을 때 a 를 b 밑으로: b 는 새 상위 자체, x 는 무관 → 허용
+    expect(moveCreatesHierarchyDependency(parentOf, [{ from: 'b', to: 'x' }], 'a', 'b')).toBe(false);
+    // a1 → g(새 상위 x 와 무관한 조상) 는 허용, a1 → b 이면 b 밑으로 거부
+    expect(moveCreatesHierarchyDependency(parentOf, [{ from: 'a1', to: 'g' }], 'a', 'x')).toBe(false);
+    expect(moveCreatesHierarchyDependency(parentOf, [{ from: 'a1', to: 'b' }], 'a', 'b')).toBe(true);
+  });
+  it('새 상위의 조상과의 의존도 거부, 관계없는 의존·하위 트리 안 의존은 허용', () => {
+    const nested = new Map(parentOf).set('y', 'x');
+    expect(moveCreatesHierarchyDependency(nested, [{ from: 'x', to: 'a1' }], 'a', 'y')).toBe(true);
+    expect(moveCreatesHierarchyDependency(nested, [{ from: 'a', to: 'a1' }], 'a', 'y')).toBe(false);
+    expect(moveCreatesHierarchyDependency(nested, [{ from: 'b', to: 'g' }], 'a', 'y')).toBe(false);
+  });
+  it('subtreeDependencyPartners 는 하위 트리 밖 상대만', () => {
+    const edges: Edge[] = [
+      { from: 'a', to: 'a1' },
+      { from: 'a1', to: 'x' },
+      { from: 'b', to: 'a' },
+    ];
+    expect([...subtreeDependencyPartners(parentOf, edges, 'a')].sort()).toEqual(['b', 'x']);
   });
 });

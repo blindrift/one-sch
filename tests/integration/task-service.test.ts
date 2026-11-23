@@ -231,6 +231,155 @@ describe('updateTask', () => {
     }
   });
 
+  it('상위 변경 재계산(T-1): 옛 조상 P·G 와 새 상위 X 의 값·version+1, ancestors·감사 rollup 에 P·G·X', async () => {
+    const g = await add({ title: 'G' });
+    const p = await add({ title: 'P', parentId: g.id });
+    await add({ title: 'c1', parentId: p.id, startDate: '2026-11-01', endDate: '2026-11-05', progress: 0 });
+    const c2 = await add({ title: 'c2', parentId: p.id, startDate: '2026-12-01', endDate: '2026-12-31', progress: 100 });
+    const x = await add({ title: 'X', startDate: '2027-01-01', endDate: '2027-01-02' });
+    const v = { p: (await row(p.id)).version, g: (await row(g.id)).version, x: (await row(x.id)).version };
+    const pBefore = await row(p.id);
+    expect([toYmd(pBefore.startDate), toYmd(pBefore.endDate)]).toEqual(['2026-11-01', '2026-12-31']);
+
+    const r = await tasks.updateTask(me, { id: c2.id, version: (await row(c2.id)).version, parentId: x.id }, meta);
+    expect(r.task.parentId).toBe(x.id);
+    expect(r.ancestors.map((t) => t.id)).toEqual([p.id, g.id, x.id]);
+    for (const id of [p.id, g.id]) {
+      const t = await row(id);
+      expect([toYmd(t.startDate), toYmd(t.endDate), t.progress]).toEqual(['2026-11-01', '2026-11-05', 0]);
+    }
+    const xr = await row(x.id);
+    expect([toYmd(xr.startDate), toYmd(xr.endDate), xr.progress]).toEqual(['2026-12-01', '2026-12-31', 100]);
+    expect((await row(p.id)).version).toBe(v.p + 1);
+    expect((await row(g.id)).version).toBe(v.g + 1);
+    expect(xr.version).toBe(v.x + 1);
+    const log = await prisma.auditLog.findFirstOrThrow({ where: { action: 'task.update', entityId: c2.id } });
+    expect(log.before).toEqual({ parentId: p.id });
+    const after = log.after as { parentId: string; rollup: Array<{ id: string }> };
+    expect(after.parentId).toBe(x.id);
+    expect(after.rollup.map((a) => a.id)).toEqual([p.id, g.id, x.id]);
+  });
+
+  it('상위 변경 재계산(T-1): 최상위로(parentId:null) 옮기면 옛 조상만 재계산', async () => {
+    const g = await add({ title: 'G' });
+    const p = await add({ title: 'P', parentId: g.id });
+    await add({ title: 'c1', parentId: p.id, startDate: '2026-11-01', endDate: '2026-11-05', progress: 0 });
+    const c2 = await add({ title: 'c2', parentId: p.id, startDate: '2026-12-01', endDate: '2026-12-31', progress: 100 });
+    const v = { p: (await row(p.id)).version, g: (await row(g.id)).version };
+
+    const r = await tasks.updateTask(me, { id: c2.id, version: (await row(c2.id)).version, parentId: null }, meta);
+    expect(r.task.parentId).toBeNull();
+    expect(r.ancestors.map((t) => t.id)).toEqual([p.id, g.id]);
+    for (const id of [p.id, g.id]) {
+      const t = await row(id);
+      expect([toYmd(t.startDate), toYmd(t.endDate), t.progress]).toEqual(['2026-11-01', '2026-11-05', 0]);
+    }
+    expect((await row(p.id)).version).toBe(v.p + 1);
+    expect((await row(g.id)).version).toBe(v.g + 1);
+    const c2r = await row(c2.id);
+    expect([c2r.parentId, toYmd(c2r.startDate), toYmd(c2r.endDate), c2r.progress]).toEqual([null, '2026-12-01', '2026-12-31', 100]);
+    const log = await prisma.auditLog.findFirstOrThrow({ where: { action: 'task.update', entityId: c2.id } });
+    expect(log.before).toEqual({ parentId: p.id });
+    const after = log.after as { parentId: string | null; rollup: Array<{ id: string }> };
+    expect(after.parentId).toBeNull();
+    expect(after.rollup.map((a) => a.id)).toEqual([p.id, g.id]);
+  });
+
+  it('상위 변경과 의존(L-1): 형제 A→B 의존이 있으면 B 를 A 밑으로 옮길 수 없고 DB·감사 불변', async () => {
+    const a = await add({ title: 'A' });
+    const b = await add({ title: 'B' });
+    await prisma.taskDependency.create({ data: { fromTaskId: a.id, toTaskId: b.id } });
+    const before = { a: await row(a.id), b: await row(b.id), audits: await prisma.auditLog.count() };
+    expect(await reasonOf(tasks.updateTask(me, { id: b.id, version: before.b.version, parentId: a.id }, meta))).toBe(
+      'VALIDATION:hierarchy',
+    );
+    // 반대 방향(A 를 B 밑으로)도 같다
+    expect(await reasonOf(tasks.updateTask(me, { id: a.id, version: before.a.version, parentId: b.id }, meta))).toBe(
+      'VALIDATION:hierarchy',
+    );
+    expect(await row(a.id)).toEqual(before.a);
+    expect(await row(b.id)).toEqual(before.b);
+    expect(await prisma.auditLog.count()).toBe(before.audits);
+    expect(await prisma.taskDependency.count()).toBe(1);
+  });
+
+  it('상위 변경과 의존(L-1): 하위 트리의 후손과 새 상위의 조상 사이 의존도 거부, 관계없는 의존이면 허용', async () => {
+    // G > T,  S > s1,  s1 → G 의존. S 를 T 밑으로 옮기면 s1 이 G 의 후손이 된다.
+    const g = await add({ title: 'G' });
+    const t = await add({ title: 'T', parentId: g.id });
+    const sTop = await add({ title: 'S' });
+    const s1 = await add({ title: 's1', parentId: sTop.id });
+    await prisma.taskDependency.create({ data: { fromTaskId: s1.id, toTaskId: g.id } });
+    const sv = (await row(sTop.id)).version;
+    const err = await tasks.updateTask(me, { id: sTop.id, version: sv, parentId: t.id }, meta).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AppError);
+    expect(err).toMatchObject({ code: 'VALIDATION', reason: 'hierarchy', fieldErrors: { parentId: expect.any(Array) } });
+    expect((await row(sTop.id)).parentId).toBeNull();
+    expect((await row(sTop.id)).version).toBe(sv);
+    // 관계없는 곳(X) 밑으로는 옮길 수 있다
+    const x = await add({ title: 'X' });
+    const r = await tasks.updateTask(me, { id: sTop.id, version: sv, parentId: x.id }, meta);
+    expect(r.task.parentId).toBe(x.id);
+  });
+
+  it('계층 동시 변경(T-2): A→B 밑, B→A 밑을 동시에 — 하나만 OK, 하나는 parent_cycle, 순환 없음(10회)', async () => {
+    for (let round = 0; round < 10; round++) {
+      await resetDb();
+      me = await prisma.user.create({ data: { email: 'me@example.com', name: 'me', role: 'MEMBER' } });
+      projectId = await makeProject('ERP');
+      const a = await add({ title: 'A' });
+      const b = await add({ title: 'B' });
+      const results = await Promise.all([
+        reasonOf(tasks.updateTask(me, { id: a.id, version: 0, parentId: b.id }, meta)),
+        reasonOf(tasks.updateTask(me, { id: b.id, version: 0, parentId: a.id }, meta)),
+      ]);
+      expect([...results].sort()).toEqual(['OK', 'VALIDATION:parent_cycle']);
+      const rows = await prisma.task.findMany({ where: { projectId }, select: { id: true, parentId: true } });
+      const parentOf = new Map(rows.map((r) => [r.id, r.parentId]));
+      for (const start of parentOf.keys()) {
+        const seen = new Set<string>();
+        for (let cur: string | null | undefined = start; cur; cur = parentOf.get(cur)) {
+          expect(seen.has(cur)).toBe(false);
+          seen.add(cur);
+        }
+      }
+      expect(rows.filter((r) => r.parentId === null)).toHaveLength(1);
+    }
+  });
+
+  // 시작=종료인 작업은 마일스톤 여부와 관계없이 가중치가 1 이라 요약 값이 같다. 그래서 부모를 일부러 틀린 값으로
+  // 만들어 두고, 재계산 경로를 탔는지(바로잡혔는지)로 확인한다.
+  async function staleParentFixture() {
+    const g = await add({ title: 'g' });
+    const p = await add({ title: 'p', parentId: g.id });
+    const c = await add({ title: 'c', parentId: p.id, startDate: '2026-11-03', endDate: '2026-11-03', progress: 40 });
+    await prisma.task.update({ where: { id: p.id }, data: { startDate: new Date('2026-10-01T00:00:00Z'), progress: 7 } });
+    return { g, p, c, pv: (await row(p.id)).version, gv: (await row(g.id)).version };
+  }
+
+  it('isMilestone 만 바꿔도 부모 재계산(T-6)', async () => {
+    const { p, c, pv } = await staleParentFixture();
+    const r = await tasks.updateTask(me, { id: c.id, version: (await row(c.id)).version, isMilestone: true }, meta);
+    expect(r.task.isMilestone).toBe(true);
+    expect(r.ancestors.map((t) => t.id)).toContain(p.id);
+    const after = await row(p.id);
+    expect([toYmd(after.startDate), toYmd(after.endDate), after.progress]).toEqual(['2026-11-03', '2026-11-03', 40]);
+    expect(after.version).toBe(pv + 1);
+  });
+
+  it('status 만 바꾸면 조상은 건드리지 않는다 — 값·version 불변(T-6)', async () => {
+    const { g, p, c, pv, gv } = await staleParentFixture();
+    const pBefore = await row(p.id);
+    const r = await tasks.updateTask(me, { id: c.id, version: (await row(c.id)).version, status: 'DONE' }, meta);
+    expect(r.task.status).toBe('DONE');
+    expect(r.ancestors).toEqual([]);
+    expect(await row(p.id)).toEqual(pBefore);
+    expect((await row(p.id)).version).toBe(pv);
+    expect((await row(g.id)).version).toBe(gv);
+    const log = await prisma.auditLog.findFirstOrThrow({ where: { action: 'task.update', entityId: c.id } });
+    expect(log.after).toEqual({ status: 'DONE' });
+  });
+
   it('DB 세션 시간대가 Asia/Seoul 이어도 2026-11-23 은 그대로 2026-11-23', async () => {
     await ownerDb.$executeRaw`ALTER DATABASE "onesch_test" SET timezone TO 'Asia/Seoul'`;
     try {
@@ -272,7 +421,22 @@ describe('deleteTask', () => {
     expect(toYmd((await row(root.id)).endDate)).toBe('2026-11-05');
     expect(r.ancestors.map((t) => t.id)).toEqual([root.id]);
     const log = await prisma.auditLog.findFirstOrThrow({ where: { action: 'task.delete' } });
-    expect(log.before).toMatchObject({ title: 'p', descendants: [{ id: c.id, title: 'c' }], dependencies: [{ fromTaskId: c.id, toTaskId: other.id }] });
+    expect(log.before).toMatchObject({ title: 'p', dependencies: [{ fromTaskId: c.id, toTaskId: other.id }] });
+    // 하위 스냅샷은 snapshot() 과 같은 필드(parentId 포함)라 감사만으로 하위 트리를 다시 세울 수 있다(L-3)
+    expect((log.before as { descendants: unknown[] }).descendants).toEqual([
+      {
+        id: c.id,
+        projectId,
+        parentId: p.id,
+        title: 'c',
+        startDate: '2026-12-01',
+        endDate: '2026-12-31',
+        progress: 0,
+        status: 'TODO',
+        assigneeId: null,
+        isMilestone: false,
+      },
+    ]);
   });
 
   it('없는 id NOT_FOUND, 보관 프로젝트 CONFLICT(archived)', async () => {

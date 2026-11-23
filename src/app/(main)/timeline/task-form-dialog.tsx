@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import type { ProjectDto, TaskDeleteResult, TaskDto, TaskWriteResult, UserOption } from '@/lib/schedule/dto';
+import type { DependencyDto, ProjectDto, TaskDeleteResult, TaskDto, TaskWriteResult, UserOption } from '@/lib/schedule/dto';
+import { moveCreatesHierarchyDependency, subtreeDependencyPartners } from '@/lib/schedule/graph';
 import { TASK_STATUSES, TASK_STATUS_LABELS, type TaskStatus } from '@/lib/schedule/status';
 import { TITLE_MAX } from '@/lib/validation/limits';
 import { createTask, deleteTask, updateTask } from '@/server/actions/task';
@@ -27,6 +28,8 @@ type Props = {
   projects: ProjectDto[];
   /** 상위 작업 후보를 고르기 위한 현재 작업 목록 */
   tasks: TaskDto[];
+  /** 상위 후보에서 의존이 걸린 작업을 빼기 위한 전체 의존(D14) */
+  allDependencies?: DependencyDto[];
   users: UserOption[];
   defaultProjectId?: string;
   /** 편집 중인 작업의 의존(선행·후행) */
@@ -69,6 +72,7 @@ function TaskForm({
   task,
   projects,
   tasks,
+  allDependencies,
   users,
   defaultProjectId,
   dependencies = [],
@@ -94,7 +98,10 @@ function TaskForm({
   const [pending, startTransition] = useTransition();
   const summary = task?.hasChildren ?? false;
 
-  // 상위 작업 후보: 같은 프로젝트, 마일스톤 아님, 자기 자신·하위 아님(깊이 제한은 서버가 검사한다)
+  // 상위 작업 후보: 같은 프로젝트, 마일스톤 아님, 자기 자신·하위 아님, 옮기면 상위·하위 사이 의존이 생기는 작업 아님(D14)
+  // (깊이 제한은 서버가 검사한다. 서버도 의존 조건을 잠금 안에서 다시 검사한다)
+  const movingId = task?.id;
+  const currentParentId = task?.parentId;
   const parentOptions = useMemo(() => {
     const inProject = tasks.filter((t) => t.projectId === projectId);
     const parentOf = new Map(inProject.map((t) => [t.id, t.parentId]));
@@ -104,11 +111,17 @@ function TaskForm({
       return d;
     };
     const underTask = (id: string) => {
-      for (let cur: string | null | undefined = id; cur; cur = parentOf.get(cur)) if (cur === task?.id) return true;
+      for (let cur: string | null | undefined = id; cur; cur = parentOf.get(cur)) if (cur === movingId) return true;
       return false;
     };
-    return inProject.filter((t) => !t.isMilestone && !underTask(t.id)).map((t) => ({ id: t.id, label: `${'— '.repeat(depth(t.id))}${t.title}` }));
-  }, [tasks, projectId, task?.id]);
+    const edges = (allDependencies ?? []).map((d) => ({ from: d.fromTaskId, to: d.toTaskId }));
+    const partners = movingId ? subtreeDependencyPartners(parentOf, edges, movingId) : null;
+    const depBlocked = (id: string) =>
+      !!movingId && !!partners && id !== currentParentId && moveCreatesHierarchyDependency(parentOf, edges, movingId, id, partners);
+    return inProject
+      .filter((t) => !t.isMilestone && !underTask(t.id) && !depBlocked(t.id))
+      .map((t) => ({ id: t.id, label: `${'— '.repeat(depth(t.id))}${t.title}` }));
+  }, [tasks, allDependencies, projectId, movingId, currentParentId]);
 
   function fail(r: Failure) {
     setError(r);

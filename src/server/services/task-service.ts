@@ -1,7 +1,7 @@
 import 'server-only';
 import type { Prisma } from '@prisma/client';
 import { parseYmd, toYmd } from '@/lib/dates';
-import { depthOf, isAncestor, subtreeHeight, type ParentMap } from '@/lib/schedule/graph';
+import { depthOf, isAncestor, moveCreatesHierarchyDependency, subtreeHeight, type ParentMap } from '@/lib/schedule/graph';
 import { summarize } from '@/lib/schedule/rollup';
 import type { TaskDeleteResult, TaskWriteResult } from '@/lib/schedule/dto';
 import { MAX_TASK_DEPTH } from '@/lib/schedule/status';
@@ -88,6 +88,22 @@ async function checkParent(
   const height = movingId ? subtreeHeight(childrenMap(parentOf), movingId) : 1;
   if (depthOf(parentOf, parentId) + height > MAX_TASK_DEPTH) {
     throw validation('parentId', `작업 계층은 최대 ${MAX_TASK_DEPTH}단계입니다.`, 'depth');
+  }
+}
+
+/**
+ * D14 를 계층 변경에도 적용: 옮기는 작업(과 후손)과 새 상위(와 그 조상) 사이에 의존이 있으면 거부한다.
+ * 프로젝트 잠금 안에서 읽으므로(의존 추가도 같은 잠금을 잡는다) 검사 뒤에 의존이 끼어들지 않는다.
+ * 두 끝이 모두 이 프로젝트 안이어야 해당되므로 그런 의존만 읽는다.
+ */
+async function checkMoveDependencies(tx: Tx, parentOf: ParentMap, projectId: string, movingId: string, newParentId: string): Promise<void> {
+  const deps = await tx.taskDependency.findMany({
+    where: { fromTask: { projectId }, toTask: { projectId } },
+    select: { fromTaskId: true, toTaskId: true },
+  });
+  const edges = deps.map((d) => ({ from: d.fromTaskId, to: d.toTaskId }));
+  if (moveCreatesHierarchyDependency(parentOf, edges, movingId, newParentId)) {
+    throw validation('parentId', '의존 관계가 있는 작업 밑으로는 옮길 수 없습니다(상위·하위 작업 사이에는 의존을 둘 수 없습니다).', 'hierarchy');
   }
 }
 
@@ -199,7 +215,9 @@ export async function updateTask(actor: Actor, input: UpdateTaskInput, meta: Req
     if (end < start) throw validation('endDate', '종료일은 시작일보다 빠를 수 없습니다.');
     if (milestone && start !== end) throw validation('endDate', '마일스톤은 시작일과 종료일이 같아야 합니다.', 'milestone_dates');
     if (changed('parentId') && patch.parentId) {
-      await checkParent(tx, await loadParentMap(tx, projectId), projectId, patch.parentId, row.id);
+      const parentOf = await loadParentMap(tx, projectId);
+      await checkParent(tx, parentOf, projectId, patch.parentId, row.id);
+      await checkMoveDependencies(tx, parentOf, projectId, row.id, patch.parentId);
     }
     if (changed('assigneeId') && patch.assigneeId) await ensureActiveUser(tx, patch.assigneeId, 'assigneeId');
 
@@ -255,7 +273,10 @@ export async function deleteTask(actor: Actor, input: DeleteTaskInput, meta: Req
     }
     const allIds = [row.id, ...descendantIds];
     const descendants = descendantIds.length
-      ? await tx.task.findMany({ where: { id: { in: descendantIds } }, select: { id: true, title: true }, orderBy: { sortOrder: 'asc' } })
+      ? (await tx.task.findMany({ where: { id: { in: descendantIds } }, orderBy: { sortOrder: 'asc' } })).map((t) => ({
+          id: t.id,
+          ...snapshot(toTaskDto(t, children.has(t.id))),
+        }))
       : [];
     const dependencies = await tx.taskDependency.findMany({
       where: { OR: [{ fromTaskId: { in: allIds } }, { toTaskId: { in: allIds } }] },

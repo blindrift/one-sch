@@ -1,6 +1,26 @@
+import type { Page, Request } from '@playwright/test';
 import { bar, createProject, createTask, createUser, DAY_CELL, dragBar, expect, formError, gotoReady, gotoTimeline, injectSession, ownerDb, resetAndSeed, test, ymdOf } from './fixtures';
 
 test.beforeEach(resetAndSeed);
+
+/**
+ * Server Action 호출(POST + next-action 헤더)을 센다. 거부된 조작이 서버 쓰기 요청을 아예 만들지 않았는지 확인한다.
+ * settle(): 늦게 나가는 요청도 잡도록 최대 ms 동안 액션 요청을 기다린다(오면 즉시 끝나고 count 로 실패가 드러난다).
+ */
+function watchActions(page: Page) {
+  const isAction = (req: Request) => req.method() === 'POST' && req.headers()['next-action'] !== undefined;
+  const seen: string[] = [];
+  page.on('request', (req) => {
+    if (isAction(req)) seen.push(req.url());
+  });
+  return {
+    count: () => seen.length,
+    settle: (ms = 1_000) => page.waitForRequest(isAction, { timeout: ms }).then(
+      () => undefined,
+      () => undefined,
+    ),
+  };
+}
 
 const datesOf = async (id: string) => {
   const t = await ownerDb.task.findUniqueOrThrow({ where: { id } });
@@ -17,10 +37,12 @@ test('VIEWER: 타임라인·프로젝트 화면은 보이고 추가·수정 단�
   await gotoTimeline(page);
   await expect(page.getByTestId('gantt').getByText('[VIEW] 보기 전용').first()).toBeVisible();
   await expect(page.getByRole('button', { name: '작업 추가' })).toHaveCount(0);
+  const actions = watchActions(page);
   await dragBar(page, bar(page, t.id), 3 * DAY_CELL, 'move');
   await bar(page, t.id).dblclick();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await page.waitForTimeout(1_000);
+  await actions.settle();
+  expect(actions.count()).toBe(0);
   expect(await datesOf(t.id)).toBe('2026-11-10~2026-11-14:0');
   // 링크 핸들도 없다(readonly)
   await expect(bar(page, t.id).locator('.wx-link')).toHaveCount(0);
@@ -42,18 +64,32 @@ test('MEMBER: 보관 프로젝트 화면은 읽기 전용(드래그 거부·DB �
   const live = await createProject(m.id, { key: 'LIVE' });
   const parent = await createTask(live.id, { title: '상위', start: '2026-11-10', end: '2026-11-14' });
   await createTask(live.id, { title: '하위', start: '2026-11-10', end: '2026-11-14', parentId: parent.id });
+  // 대조군: 상위 계층과 무관한 최상위 잎 작업(옮겨도 parent 의 값·version 은 그대로)
+  const leaf = await createTask(live.id, { title: '대조 작업', start: '2026-11-10', end: '2026-11-14' });
   await injectSession(context, m.id);
 
   await gotoTimeline(page, '/projects/ARCH');
   await expect(page.getByText('보관(읽기 전용)')).toBeVisible();
   await expect(page.getByRole('button', { name: '작업 추가' })).toBeDisabled();
+  const archivedActions = watchActions(page);
   await dragBar(page, bar(page, at.id), 3 * DAY_CELL, 'move');
-  await page.waitForTimeout(1_000);
+  await archivedActions.settle();
+  expect(archivedActions.count()).toBe(0);
   expect(await datesOf(at.id)).toBe('2026-11-10~2026-11-14:0');
 
   await gotoTimeline(page, '/projects/LIVE');
+  // 대조(N-1): 쓸 수 있는 잎 막대를 끌면 watchActions 가 실제 액션 요청을 센다(0 건 단언이 헛돌지 않음을 보인다).
+  const controlActions = watchActions(page);
+  const saved = page.waitForResponse((res) => res.request().method() === 'POST' && res.request().headers()['next-action'] !== undefined);
+  await dragBar(page, bar(page, leaf.id), 3 * DAY_CELL, 'move');
+  expect((await saved).ok()).toBe(true);
+  expect(controlActions.count()).toBe(1);
+  expect(await datesOf(leaf.id)).toBe('2026-11-13~2026-11-17:1');
+
+  const summaryActions = watchActions(page);
   await dragBar(page, bar(page, parent.id), 3 * DAY_CELL, 'move');
-  await page.waitForTimeout(1_000);
+  await summaryActions.settle();
+  expect(summaryActions.count()).toBe(0);
   expect(await datesOf(parent.id)).toBe('2026-11-10~2026-11-14:0');
   await bar(page, parent.id).dblclick();
   await expect(page.getByRole('dialog').getByLabel('시작일')).toBeDisabled();

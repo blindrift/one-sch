@@ -52,11 +52,21 @@ describe('todayInSeoul', () => {
 });
 
 describe('SVAR 변환(로컬 자정, 배타 종료)', () => {
-  const CASES = ['2026-11-23', '2026-01-31', '2026-12-31', '2028-02-29', '2026-03-07', '2026-03-08', '2026-11-01'];
+  // 2026-03-08·11-01 = 미국 DST 시작·끝, 2026-03-29·10-25 = 영국 DST 시작·끝
+  const CASES = ['2026-11-23', '2026-01-31', '2026-12-31', '2028-02-29', '2026-03-07', '2026-03-08', '2026-11-01', '2026-03-29', '2026-10-25'];
+  /** TZ 별 getTimezoneOffset 기대값(1월, 7월). stubEnv 가 실제로 반영됐는지 확인해 테스트가 헛돌지 않게 한다. */
+  const OFFSETS: Record<string, [number, number]> = {
+    'Asia/Seoul': [-540, -540],
+    'America/Los_Angeles': [480, 420],
+    UTC: [0, 0],
+    'Europe/London': [0, -60],
+  };
 
-  for (const tz of ['Asia/Seoul', 'America/Los_Angeles', 'UTC', 'Europe/London']) {
+  for (const [tz, [winter, summer]] of Object.entries(OFFSETS)) {
     it(`${tz}: 시작·종료 왕복이 원래 날짜`, () => {
       vi.stubEnv('TZ', tz);
+      expect(new Date(2026, 0, 15).getTimezoneOffset()).toBe(winter);
+      expect(new Date(2026, 6, 15).getTimezoneOffset()).toBe(summer);
       for (const ymd of CASES) {
         const start = ymdToLocalDate(ymd);
         expect(start.getHours()).toBe(0);
@@ -70,10 +80,13 @@ describe('SVAR 변환(로컬 자정, 배타 종료)', () => {
 
     it(`${tz}: 자정에서 몇 시간 어긋난 값(DST·ms 덧셈)도 가까운 날로 맞춘다`, () => {
       vi.stubEnv('TZ', tz);
-      const d = ymdToLocalDate('2026-03-08');
-      expect(ymdFromLocalDate(new Date(d.getTime() - 60 * 60 * 1000))).toBe('2026-03-08');
-      expect(ymdFromLocalDate(new Date(d.getTime() + 60 * 60 * 1000))).toBe('2026-03-08');
-      expect(ymdFromSvarEnd(new Date(svarEndFromYmd('2026-03-08').getTime() - 60 * 60 * 1000))).toBe('2026-03-08');
+      expect(new Date(2026, 0, 15).getTimezoneOffset()).toBe(winter);
+      for (const ymd of ['2026-03-08', '2026-03-29', '2026-10-25']) {
+        const d = ymdToLocalDate(ymd);
+        expect(ymdFromLocalDate(new Date(d.getTime() - 60 * 60 * 1000))).toBe(ymd);
+        expect(ymdFromLocalDate(new Date(d.getTime() + 60 * 60 * 1000))).toBe(ymd);
+        expect(ymdFromSvarEnd(new Date(svarEndFromYmd(ymd).getTime() - 60 * 60 * 1000))).toBe(ymd);
+      }
     });
   }
 

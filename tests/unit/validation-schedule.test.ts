@@ -82,3 +82,26 @@ describe('task', () => {
     expect(addDependencySchema.safeParse({ fromTaskId: ID, toTaskId: ID2 }).success).toBe(true);
   });
 });
+
+describe('제목·이름의 제어 문자(S-4)', () => {
+  const bad = [
+    ...['a\u0000b', 'a\u0007b', 'a\nb', 'a\tb', 'a\u001fb', 'a\u007fb', 'a\u202ab', 'a\u202eb', 'a\u2066b', 'a\u2069b'],
+    // S-5: C1 제어, ALM, 폭 없는 문자·LRM/RLM, 줄·문단 구분자, BOM
+    ...['a\u0080b', 'a\u0085b', 'a\u009fb', 'a\u061cb', 'a\u200bb', 'a\u200cb', 'a\u200eb', 'a\u200fb', 'a\u2028b', 'a\u2029b', 'a\ufeffb'],
+  ];
+  const taskBase = { projectId: ID, startDate: '2026-11-01', endDate: '2026-11-02' };
+  const projectBase = { key: 'ERP', color: '#aabbcc' };
+  it.each(bad.map((s) => [JSON.stringify(s), s]))('%s 거부(작업 생성·수정, 프로젝트 생성·수정)', (_, s) => {
+    expect(fieldsOf(createTaskSchema.safeParse({ ...taskBase, title: s }))).toContain('title');
+    expect(fieldsOf(updateTaskSchema.safeParse({ id: ID, version: 0, title: s }))).toContain('title');
+    expect(fieldsOf(createProjectSchema.safeParse({ ...projectBase, name: s }))).toContain('name');
+    expect(fieldsOf(updateProjectSchema.safeParse({ id: ID, version: 0, name: s }))).toContain('name');
+  });
+  it('앞뒤 공백·줄바꿈은 trim 되고, 한글·이모지·기호·히브리 문자·NBSP 는 허용', () => {
+    expect(createTaskSchema.parse({ ...taskBase, title: '\n 설계 검토 \t' }).title).toBe('설계 검토');
+    for (const ok of ['설계 검토 🚀', 'A/B (v2) — 최종', 'אבג עברית', 'x\u00a0y', '\u{1F469}\u200d\u{1F4BB} 작업']) {
+      expect(createTaskSchema.safeParse({ ...taskBase, title: ok }).success).toBe(true);
+      expect(createProjectSchema.safeParse({ ...projectBase, name: ok }).success).toBe(true);
+    }
+  });
+});

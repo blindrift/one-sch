@@ -75,3 +75,32 @@ export function subtreeHeight(children: ReadonlyMap<string, readonly string[]>, 
   }
   return height;
 }
+
+/** movingId 와 그 후손(S)의 의존 상대 중 S 밖에 있는 작업 id */
+export function subtreeDependencyPartners(parentOf: ParentMap, edges: readonly Edge[], movingId: string): Set<string> {
+  const inSubtree = (id: string) => id === movingId || isAncestor(parentOf, movingId, id);
+  const out = new Set<string>();
+  for (const e of edges) {
+    const a = inSubtree(e.from);
+    const b = inSubtree(e.to);
+    if (a && !b) out.add(e.to);
+    else if (b && !a) out.add(e.from);
+  }
+  return out;
+}
+
+/**
+ * movingId(와 하위 트리)를 newParentId 밑으로 옮기면 상위·하위 사이 의존이 생기는지(D14 를 계층 변경에도 적용).
+ * S = 옮기는 작업 + 후손, P = 새 상위 + 그 조상. 한 끝이 S, 다른 끝이 P 인 의존이 하나라도 있으면 true.
+ * partners 는 subtreeDependencyPartners 결과(후보 여럿을 볼 때 한 번만 계산해 넘긴다).
+ */
+export function moveCreatesHierarchyDependency(
+  parentOf: ParentMap,
+  edges: readonly Edge[],
+  movingId: string,
+  newParentId: string,
+  partners: ReadonlySet<string> = subtreeDependencyPartners(parentOf, edges, movingId),
+): boolean {
+  if (partners.size === 0) return false;
+  return partners.has(newParentId) || ancestorsOf(parentOf, newParentId).some((a) => partners.has(a));
+}

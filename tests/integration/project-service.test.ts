@@ -124,6 +124,39 @@ describe('project-service', () => {
     expect(actions).toEqual(['project.create', 'project.archive', 'project.unarchive']);
   });
 
+  it('보관/해제의 낡은 version 은 CONFLICT(version)이고 DB·감사 불변(T-5)', async () => {
+    const me = await makeUser('me@example.com');
+    const p = await projects.createProject(me, base, meta);
+    await projects.updateProject(me, { id: p.id, version: 0, name: 'a' }, meta);
+    const before = await prisma.project.findUniqueOrThrow({ where: { id: p.id } });
+    const audits = await prisma.auditLog.count();
+    expect(await reasonOf(projects.setProjectArchived(me, { id: p.id, version: 0, archived: true }, meta))).toBe('CONFLICT:version');
+    expect(await prisma.project.findUniqueOrThrow({ where: { id: p.id } })).toEqual(before);
+    expect(await prisma.auditLog.count()).toBe(audits);
+    // 보관된 상태에서 낡은 version 으로 해제해도 같다
+    await projects.setProjectArchived(me, { id: p.id, version: 1, archived: true }, meta);
+    const archived = await prisma.project.findUniqueOrThrow({ where: { id: p.id } });
+    const audits2 = await prisma.auditLog.count();
+    expect(await reasonOf(projects.setProjectArchived(me, { id: p.id, version: 1, archived: false }, meta))).toBe('CONFLICT:version');
+    expect(await prisma.project.findUniqueOrThrow({ where: { id: p.id } })).toEqual(archived);
+    expect(await prisma.auditLog.count()).toBe(audits2);
+  });
+
+  it('같은 상태로 다시 보관/해제하면 no-op — version·감사 불변(T-5)', async () => {
+    const me = await makeUser('me@example.com');
+    const p = await projects.createProject(me, base, meta);
+    const audits = await prisma.auditLog.count();
+    const same = await projects.setProjectArchived(me, { id: p.id, version: 0, archived: false }, meta);
+    expect(same).toMatchObject({ archived: false, version: 0 });
+    expect(await prisma.auditLog.count()).toBe(audits);
+    await projects.setProjectArchived(me, { id: p.id, version: 0, archived: true }, meta);
+    const audits2 = await prisma.auditLog.count();
+    const again = await projects.setProjectArchived(me, { id: p.id, version: 1, archived: true }, meta);
+    expect(again).toMatchObject({ archived: true, version: 1 });
+    expect(await prisma.auditLog.count()).toBe(audits2);
+    expect(await prisma.auditLog.count({ where: { action: 'project.archive' } })).toBe(1);
+  });
+
   it('감사 쓰기가 실패하면 변경도 롤백', async () => {
     const me = await makeUser('me@example.com');
     audit.failNext = true;

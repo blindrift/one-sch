@@ -1,9 +1,14 @@
 import { z } from 'zod';
 import { PROJECT_STATUSES } from '../schedule/status';
-import { COLOR_RE, PROJECT_KEY_RE, PROJECT_NAME_MAX } from './limits';
+import { COLOR_RE, PROJECT_KEY_RE, PROJECT_NAME_MAX, UNSAFE_TEXT_MESSAGE, UNSAFE_TEXT_RE } from './limits';
 import { checkDateOrder, id, nullableId, nullableYmd, version } from './schedule-common';
 
-const name = z.string().trim().min(1, '이름을 입력해 주세요.').max(PROJECT_NAME_MAX, `이름은 ${PROJECT_NAME_MAX}자 이하입니다.`);
+const name = z
+  .string()
+  .trim()
+  .min(1, '이름을 입력해 주세요.')
+  .max(PROJECT_NAME_MAX, `이름은 ${PROJECT_NAME_MAX}자 이하입니다.`)
+  .refine((v) => !UNSAFE_TEXT_RE.test(v), UNSAFE_TEXT_MESSAGE);
 const color = z.string().trim().regex(COLOR_RE, '색은 #RRGGBB 형식이어야 합니다.').toLowerCase();
 const status = z.enum(PROJECT_STATUSES);
 

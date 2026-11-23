@@ -98,16 +98,8 @@ export class TimelineStore {
     this.deps = this.deps.filter((d) => d.id !== id);
   }
 
-  /** 프로젝트 요약 행(최상위 작업에서 다시 계산) — 드래그 저장 뒤 그 자리만 고칠 때 쓴다 */
-  projectRow(projectId: string): GanttRow | null {
-    const p = this.project(projectId);
-    if (!p) return null;
-    const top = this.taskList().filter((t) => t.projectId === projectId && !t.parentId);
-    return projectToRow(p, top, !this.closed.has(projectRowId(projectId)));
-  }
-
-  /** 필터를 적용한 간트 행·링크 */
-  view(filter: TimelineFilter): TimelineViewData {
+  /** 필터에 맞는 프로젝트와 작업(맞는 작업의 조상 포함). match 가 null 이면 작업 조건 없음 */
+  private filtered(filter: TimelineFilter) {
     const projects = filter.projectKey ? this.projects.filter((p) => p.key === filter.projectKey) : this.projects;
     const projectIds = new Set(projects.map((p) => p.id));
     const tasks = this.taskList().filter((t) => projectIds.has(t.projectId));
@@ -120,6 +112,26 @@ export class TimelineStore {
     const visible = filterTasks(tasks, match);
     // 작업 조건으로 거를 때는 맞는 작업이 없는 프로젝트를 숨긴다.
     const shownProjects = match ? projects.filter((p) => visible.some((t) => t.projectId === p.id)) : projects;
+    return { shownProjects, visible };
+  }
+
+  /**
+   * 프로젝트 요약 행 — 드래그 저장 뒤 그 자리만 고칠 때 쓴다. view() 와 같은 기준(현재 필터 결과의 최상위 작업,
+   * 상위가 필터로 빠진 작업은 최상위로 본다)으로 다시 계산한다. 필터로 숨은 프로젝트면 null.
+   */
+  projectRow(projectId: string, filter: TimelineFilter = EMPTY_FILTER): GanttRow | null {
+    const { shownProjects, visible } = this.filtered(filter);
+    const p = shownProjects.find((x) => x.id === projectId);
+    if (!p) return null;
+    const inProject = visible.filter((t) => t.projectId === projectId);
+    const ids = new Set(inProject.map((t) => t.id));
+    const top = inProject.filter((t) => !t.parentId || !ids.has(t.parentId));
+    return projectToRow(p, top, !this.closed.has(projectRowId(projectId)));
+  }
+
+  /** 필터를 적용한 간트 행·링크 */
+  view(filter: TimelineFilter): TimelineViewData {
+    const { shownProjects, visible } = this.filtered(filter);
     const visibleTaskIds = new Set(visible.map((t) => t.id));
     return {
       rows: toGanttRows({ projects: shownProjects, tasks: visible, users: this.users, today: this.today, closed: this.closed }),

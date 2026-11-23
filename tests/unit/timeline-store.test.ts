@@ -94,6 +94,52 @@ describe('TimelineStore', () => {
     expect(s.projectRow('p1')).toMatchObject({ id: projectRowId('p1'), startYmd: '2026-11-01', endYmd: '2026-11-05' });
   });
 
+  it('상위 변경 결과 반영(T-9): 옛 부모는 하위가 없어지면 일반 작업, 옮긴 작업의 type·parent 갱신', () => {
+    const s = new TimelineStore(data());
+    // b 를 c 밑으로: a 는 아직 c 가 있어 요약, c 는 요약이 된다
+    s.applyWrite({
+      task: task({ id: 'b', parentId: 'c', assigneeId: 'u1', status: 'DONE', sortOrder: 2, version: 1 }),
+      ancestors: [task({ id: 'c', parentId: 'a', sortOrder: 3, version: 1 })],
+    });
+    expect(s.hasChildren('a')).toBe(true);
+    expect(s.hasChildren('c')).toBe(true);
+    // c(와 b) 를 최상위로: a 는 하위가 없어진다
+    s.applyWrite({ task: task({ id: 'c', parentId: null, sortOrder: 3, version: 2 }), ancestors: [] });
+    expect(s.hasChildren('a')).toBe(false);
+    expect(s.task('a')).toMatchObject({ hasChildren: false });
+    const rows = new Map(s.view(EMPTY_FILTER).rows.map((r) => [r.id, r]));
+    expect(rows.get('a')).toMatchObject({ type: 'task', parent: projectRowId('p1') });
+    expect(rows.get('c')).toMatchObject({ type: 'summary', parent: projectRowId('p1') });
+    expect(rows.get('b')).toMatchObject({ type: 'task', parent: 'c' });
+    expect(s.descendantsOf('c')).toEqual(['b']);
+    expect(s.descendantsOf('a')).toEqual([]);
+  });
+
+  it('projectRow 는 view() 와 같은 기준(현재 필터 결과의 최상위 작업)으로 계산한다(L-2)', () => {
+    const d = data();
+    d.tasks.push(task({ id: 'z', startDate: '2026-12-01', endDate: '2026-12-20', progress: 100, sortOrder: 4 }));
+    const s = new TimelineStore(d);
+    const pick = (r: { startYmd: string | null; endYmd: string | null; progress: number } | null | undefined) =>
+      r && { startYmd: r.startYmd, endYmd: r.endYmd, progress: r.progress };
+    const filters = [
+      EMPTY_FILTER,
+      { ...EMPTY_FILTER, assigneeId: 'u1' },
+      { ...EMPTY_FILTER, status: 'DONE' as const },
+      { ...EMPTY_FILTER, projectKey: 'ERP' },
+      { ...EMPTY_FILTER, assigneeId: 'none' },
+    ];
+    for (const f of filters) {
+      const viewRow = s.view(f).rows.find((r) => r.id === projectRowId('p1'));
+      expect(pick(s.projectRow('p1', f))).toEqual(pick(viewRow));
+    }
+    // 필터 없음이면 z 까지, 담당자 u1 이면 a(b) 만
+    expect(s.projectRow('p1')).toMatchObject({ startYmd: '2026-11-01', endYmd: '2026-12-20' });
+    expect(s.projectRow('p1', { ...EMPTY_FILTER, assigneeId: 'u1' })).toMatchObject({ startYmd: '2026-11-01', endYmd: '2026-11-05' });
+    // 필터로 숨은 프로젝트는 null
+    expect(s.projectRow('p1', { ...EMPTY_FILTER, projectKey: 'WEB' })).toBeNull();
+    expect(s.projectRow('p2', { ...EMPTY_FILTER, assigneeId: 'u1' })).toBeNull();
+  });
+
   it('의존 추가·삭제(중복 없이)', () => {
     const s = new TimelineStore(data());
     s.addDependency({ id: 'd3', fromTaskId: 'a', toTaskId: 'w' });

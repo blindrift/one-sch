@@ -114,9 +114,9 @@ export function TimelineView({ data, canEdit, initialFilter, initialZoom, scope 
   }
 
   // SVAR 이벤트 처리기는 처음 한 번만 붙으므로, 바뀌는 값(사본·권한)은 ref 로 읽는다.
-  const live = useRef({ store, canEdit });
+  const live = useRef({ store, canEdit, filter });
   useLayoutEffect(() => {
-    live.current = { store, canEdit };
+    live.current = { store, canEdit, filter };
   });
 
   const openEditor = useCallback((id: string) => {
@@ -169,7 +169,7 @@ export function TimelineView({ data, canEdit, initialFilter, initialZoom, scope 
         }
         const projectIds = new Set(tasks.map((t) => t.projectId));
         for (const pid of projectIds) {
-          const row = s.projectRow(pid);
+          const row = s.projectRow(pid, live.current.filter);
           if (row?.start && api.getTask(row.id)) {
             api.exec('update-task', {
               id: row.id,
@@ -252,7 +252,7 @@ export function TimelineView({ data, canEdit, initialFilter, initialZoom, scope 
             dropTemp();
             if (!r.ok) {
               showError(r.message);
-              if (r.code === 'NOT_FOUND' || (r.code === 'CONFLICT' && /보관/.test(r.message))) refresh();
+              if (r.code === 'NOT_FOUND' || (r.code === 'CONFLICT' && r.reason === 'archived')) refresh();
               return;
             }
             s.addDependency(r.data);
@@ -429,6 +429,7 @@ export function TimelineView({ data, canEdit, initialFilter, initialZoom, scope 
           task={editing}
           projects={writableProjects}
           tasks={taskList}
+          allDependencies={store.deps}
           users={store.users}
           defaultProjectId={defaultProjectId}
           descendantCount={editing ? store.descendantsOf(editing.id).length : 0}

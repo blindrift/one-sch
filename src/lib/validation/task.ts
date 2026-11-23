@@ -1,9 +1,14 @@
 import { z } from 'zod';
 import { TASK_STATUSES } from '../schedule/status';
-import { TITLE_MAX } from './limits';
+import { TITLE_MAX, UNSAFE_TEXT_MESSAGE, UNSAFE_TEXT_RE } from './limits';
 import { checkDateOrder, id, nullableId, version, ymd } from './schedule-common';
 
-const title = z.string().trim().min(1, '제목을 입력해 주세요.').max(TITLE_MAX, `제목은 ${TITLE_MAX}자 이하입니다.`);
+const title = z
+  .string()
+  .trim()
+  .min(1, '제목을 입력해 주세요.')
+  .max(TITLE_MAX, `제목은 ${TITLE_MAX}자 이하입니다.`)
+  .refine((v) => !UNSAFE_TEXT_RE.test(v), UNSAFE_TEXT_MESSAGE);
 const progress = z.number().int('진행률은 정수입니다.').min(0).max(100);
 const status = z.enum(TASK_STATUSES);
 
