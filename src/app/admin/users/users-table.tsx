@@ -1,5 +1,6 @@
 'use client';
 
+import { MoreHorizontal } from 'lucide-react';
 import { useState, useTransition } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -57,16 +58,17 @@ export function UsersTable({ users, currentUserId }: { users: UserRow[]; current
           <AlertDescription>{message}</AlertDescription>
         </Alert>
       ) : null}
+      <div className="overflow-hidden rounded-xl border border-line bg-background shadow-[var(--shadow-sm)]">
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>이름</TableHead>
+            <TableHead className="pl-4">이름</TableHead>
             <TableHead>계정</TableHead>
             <TableHead>역할</TableHead>
             <TableHead>상태</TableHead>
             <TableHead>마지막 로그인</TableHead>
             <TableHead>세션</TableHead>
-            <TableHead className="text-right">작업</TableHead>
+            <TableHead className="pr-4 text-right">작업</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -75,11 +77,16 @@ export function UsersTable({ users, currentUserId }: { users: UserRow[]; current
             const isMe = u.id === currentUserId;
             return (
               <TableRow key={u.id} data-testid={`user-row-${u.email ?? u.username}`}>
-                <TableCell>
-                  {u.name}
-                  {isMe ? <span className="ml-1 text-xs text-muted-foreground">(나)</span> : null}
+                <TableCell className="pl-4">
+                  <span className="inline-flex items-center gap-2.5">
+                    <span aria-hidden className="flex size-7 items-center justify-center rounded-full bg-brand-soft text-xs font-semibold text-brand">
+                      {u.name.slice(0, 1)}
+                    </span>
+                    <span className="font-medium">{u.name}</span>
+                    {isMe ? <span className="text-xs text-text-subtle">(나)</span> : null}
+                  </span>
                 </TableCell>
-                <TableCell className="font-mono text-xs">{u.email ?? `${u.username} (로컬)`}</TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">{u.email ?? `${u.username} (로컬)`}</TableCell>
                 <TableCell>
                   <Select
                     value={u.role}
@@ -99,16 +106,28 @@ export function UsersTable({ users, currentUserId }: { users: UserRow[]; current
                     </SelectContent>
                   </Select>
                 </TableCell>
-                <TableCell className="flex gap-1">
-                  {u.active ? <Badge variant="secondary">활성</Badge> : <Badge variant="outline">비활성</Badge>}
+                <TableCell>
+                  <span className="inline-flex gap-1">
+                  {u.active ? (
+                    <Badge variant="secondary" className="gap-1.5 bg-[color-mix(in_srgb,var(--status-done)_12%,transparent)] text-status-done">
+                      <span className="size-1.5 rounded-full bg-status-done" aria-hidden />
+                      활성
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-muted-foreground">
+                      비활성
+                    </Badge>
+                  )}
                   {locked ? <Badge variant="destructive">잠김</Badge> : null}
+                  </span>
                 </TableCell>
-                <TableCell className="text-xs">{u.lastLoginAt ? dateFmt.format(new Date(u.lastLoginAt)) : '-'}</TableCell>
-                <TableCell>{u.sessionCount}</TableCell>
-                <TableCell className="text-right">
+                <TableCell className="text-xs text-muted-foreground tabular-nums">{u.lastLoginAt ? dateFmt.format(new Date(u.lastLoginAt)) : '-'}</TableCell>
+                <TableCell className="tabular-nums">{u.sessionCount}</TableCell>
+                <TableCell className="pr-4 text-right">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm" disabled={pending} aria-label={`${u.name} 작업`}>
+                      <Button variant="ghost" size="sm" disabled={pending} aria-label={`${u.name} 작업`}>
+                        <MoreHorizontal aria-hidden />
                         작업
                       </Button>
                     </DropdownMenuTrigger>
@@ -144,6 +163,7 @@ export function UsersTable({ users, currentUserId }: { users: UserRow[]; current
           })}
         </TableBody>
       </Table>
+      </div>
 
       <Dialog open={tempPassword !== null} onOpenChange={(v) => !v && setTempPassword(null)}>
         <DialogContent>

@@ -19,8 +19,8 @@ export function ChangePasswordForm() {
   const fieldErrors = state && !state.ok ? (state.fieldErrors ?? {}) : {};
 
   return (
-    <form action={action} className="flex flex-col gap-3">
-      <ul className="list-disc pl-5 text-xs text-muted-foreground">
+    <form action={action} className="flex flex-col gap-3.5">
+      <ul className="list-disc rounded-lg bg-surface-muted py-2.5 pr-3 pl-7 text-xs leading-5 text-muted-foreground">
         <li>{PASSWORD_MIN}자 이상</li>
         <li>아이디와 &apos;admin&apos; 을 포함할 수 없음</li>
         <li>이전 비밀번호와 달라야 함</li>
@@ -35,6 +35,7 @@ export function ChangePasswordForm() {
             autoComplete={f.autoComplete}
             required
             maxLength={PASSWORD_MAX}
+            className="h-9"
             aria-invalid={fieldErrors[f.name] ? true : undefined}
           />
           {fieldErrors[f.name]?.map((m) => (
@@ -49,7 +50,7 @@ export function ChangePasswordForm() {
           <AlertDescription>{state.message}</AlertDescription>
         </Alert>
       ) : null}
-      <Button type="submit" disabled={pending}>
+      <Button type="submit" disabled={pending} className="mt-1 h-10 text-sm">
         {pending ? '변경 중…' : '변경'}
       </Button>
     </form>

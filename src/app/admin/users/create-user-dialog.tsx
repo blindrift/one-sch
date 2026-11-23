@@ -1,5 +1,6 @@
 'use client';
 
+import { UserPlus } from 'lucide-react';
 import { useState, useTransition } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -47,7 +48,10 @@ export function CreateUserDialog() {
       }}
     >
       <DialogTrigger asChild>
-        <Button>사용자 등록</Button>
+        <Button>
+          <UserPlus aria-hidden />
+          사용자 등록
+        </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
