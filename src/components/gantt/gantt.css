@@ -1,4 +1,9 @@
-/* 간트 화면 보조 스타일. SVAR 클래스(wx-*)를 대상으로 하므로 전역 CSS 다(gantt-view 에서만 import). */
+/* 간트 화면 보조 스타일. SVAR 클래스(wx-*)를 대상으로 하므로 전역 CSS 다(gantt-chart 에서만 import). */
+
+/* <Willow> 와 Gantt 가 만드는 테마 div(두 겹)에는 높이가 없어, 그대로 두면 간트가 내용 높이만큼 늘어나 행 가상화가 꺼진다(3,000건이면 막대를 모두 그림). */
+.og-gantt .wx-theme {
+  height: 100%;
+}
 
 /* 막대 색: 템플릿이 그리는 배경(.og-bar-bg)이 진행률 채움 아래, 막대 자체 배경 위에 오도록 막대를 쌓임 맥락으로 만든다. */
 .og-gantt .wx-bar.wx-task,

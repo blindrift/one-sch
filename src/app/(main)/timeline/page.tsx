@@ -12,7 +12,7 @@ export default async function TimelinePage({ searchParams }: { searchParams: Pro
   const data = await loadTimeline({ includeArchived });
 
   return (
-    <main>
+    <main className="flex h-[calc(100vh-3rem)] flex-col">
       <h1 className="sr-only">전체 타임라인</h1>
       <TimelineView
         data={data}

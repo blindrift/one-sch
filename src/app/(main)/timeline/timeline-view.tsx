@@ -6,12 +6,15 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { IApi } from '@svar-ui/react-gantt';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { isProjectRow, projectRowId } from '@/components/gantt/adapter';
+import { dragPatch, isProjectRow, LINK_REJECTION_MESSAGES, projectRowId, rowValues, validateLink } from '@/components/gantt/adapter';
 import { ZOOMS, ZOOM_LABELS, type Zoom } from '@/components/gantt/scales';
 import { TimelineStore, UNASSIGNED, type TimelineFilter } from '@/components/gantt/timeline-store';
-import type { TaskDeleteResult, TaskWriteResult, TimelineData } from '@/lib/schedule/dto';
+import type { TaskDeleteResult, TaskDto, TaskWriteResult, TimelineData } from '@/lib/schedule/dto';
+import { isLate } from '@/lib/schedule/rollup';
 import { TASK_STATUSES, TASK_STATUS_LABELS, type TaskStatus } from '@/lib/schedule/status';
-import { SELECT_CLASS, TaskFormDialog } from './task-form-dialog';
+import { addDependency, removeDependency } from '@/server/actions/dependency';
+import { updateTask } from '@/server/actions/task';
+import { SELECT_CLASS, TaskFormDialog, type DependencyItem } from './task-form-dialog';
 
 // SVAR 는 브라우저 전용(window 사용)이라 서버 렌더를 끈다. ssr:false 는 클라이언트 컴포넌트 안에서만 쓸 수 있다.
 const GanttChart = dynamic(() => import('@/components/gantt/gantt-chart'), {
@@ -80,7 +83,17 @@ export function TimelineView({ data, canEdit, initialFilter, initialZoom, scope 
     syncUrl(filter, z);
   }
 
+  // 보관 포함은 서버가 다시 읽어야 하므로 이동한다. 이동이 끝날 때까지 체크 상태를 먼저 보여 준다.
+  const [archivedChecked, setArchivedChecked] = useState(scope.kind === 'all' && scope.includeArchived);
+  const [archivedSource, setArchivedSource] = useState(archivedChecked);
+  const includeArchivedProp = scope.kind === 'all' && scope.includeArchived;
+  if (archivedSource !== includeArchivedProp) {
+    setArchivedSource(includeArchivedProp);
+    setArchivedChecked(includeArchivedProp);
+  }
+
   function toggleArchived(include: boolean) {
+    setArchivedChecked(include);
     const q = new URLSearchParams(window.location.search);
     if (include) q.set('archived', '1');
     else q.delete('archived');
@@ -117,26 +130,177 @@ export function TimelineView({ data, canEdit, initialFilter, initialZoom, scope 
     setDialog({ open: true, taskId: id });
   }, []);
 
+  /** 같은 문구면 다시 그리지 않는다(드래그 중 여러 번 불릴 수 있다). */
+  const showError = useCallback((text: string) => setMessage((m) => (m?.kind === 'error' && m.text === text ? m : { kind: 'error', text })), []);
+
   const onInit = useCallback(
     (api: IApi) => {
       apiRef.current = api;
+      const saving = new Set<string>();
+
       for (const action of BLOCKED_ACTIONS) api.intercept(action, (ev: Record<string, unknown>) => ev.eventSource === SERVER);
       api.intercept('show-editor', (ev) => {
         if (ev.id !== null && ev.id !== undefined) openEditor(String(ev.id));
         return false;
       });
-      // 드래그 편집과 의존 추가는 다음 단계에서 붙인다. 지금은 서버 값 반영만 통과시킨다.
-      api.intercept('update-task', (ev) => ev.eventSource === SERVER);
-      api.intercept('add-link', (ev) => ev.eventSource === SERVER);
-      api.intercept('delete-link', (ev) => ev.eventSource === SERVER);
       api.on('open-task', (ev) => {
         const id = String(ev.id);
         if (ev.mode) live.current.store.closed.delete(id);
         else live.current.store.closed.add(id);
       });
+
+      /** 막대를 직접 바꿀 수 없는 이유(없으면 null): 권한·프로젝트 행·요약(D4)·보관(D6)·저장 중 */
+      const dragDenied = (id: string): string | null => {
+        const { store: s, canEdit: editable } = live.current;
+        if (!editable) return '권한이 없습니다.';
+        if (isProjectRow(id)) return '프로젝트 행은 작업에서 자동으로 계산됩니다.';
+        const t = s.task(id);
+        if (!t) return '대상을 찾을 수 없습니다.';
+        if (s.isReadonlyProject(t.projectId)) return LINK_REJECTION_MESSAGES.readonly;
+        if (t.hasChildren) return '하위 작업이 있는 작업의 기간·진행률은 하위 작업에서 자동으로 계산됩니다.';
+        if (saving.has(id)) return '저장 중입니다. 잠시 후 다시 시도해 주세요.';
+        return null;
+      };
+
+      /** 서버 값으로 막대를 고친다(작업·조상·프로젝트 요약 행) */
+      const applyServerValues = (s: TimelineStore, tasks: TaskDto[]) => {
+        for (const t of tasks) {
+          if (api.getTask(t.id)) api.exec('update-task', { id: t.id, task: { ...rowValues(t), late: isLate(t, s.today) }, eventSource: SERVER });
+        }
+        const projectIds = new Set(tasks.map((t) => t.projectId));
+        for (const pid of projectIds) {
+          const row = s.projectRow(pid);
+          if (row?.start && api.getTask(row.id)) {
+            api.exec('update-task', {
+              id: row.id,
+              task: { start: row.start, end: row.end, progress: row.progress, startYmd: row.startYmd, endYmd: row.endYmd },
+              eventSource: SERVER,
+            });
+          }
+        }
+      };
+
+      // 드래그(이동·끝 늘이기·진행률): 거부는 intercept 에서, 저장은 끝났을 때(inProgress 아님) 한 번만(3.8)
+      api.intercept('drag-task', (ev) => dragDenied(String(ev.id)) === null);
+      api.intercept('update-task', (ev) => {
+        if (ev.eventSource === SERVER) return true;
+        const reason = dragDenied(String(ev.id));
+        if (reason) {
+          if (!ev.inProgress) showError(reason);
+          return false;
+        }
+        return true;
+      });
+      api.on('update-task', (ev) => {
+        if (ev.inProgress || ev.eventSource === SERVER) return;
+        const id = String(ev.id);
+        const s = live.current.store;
+        const before = s.task(id);
+        if (!before) return;
+        const now = api.getTask(id);
+        const patch = dragPatch(before, { start: now.start, end: now.end, progress: now.progress });
+        const revert = () => api.exec('update-task', { id, task: rowValues(before), eventSource: SERVER });
+        if (Object.keys(patch).length === 0) {
+          revert(); // 반나절 미만 움직임 등: 서버 값 자리로 맞춘다
+          return;
+        }
+        saving.add(id);
+        void updateTask({ id, version: before.version, ...patch })
+          .then((r) => {
+            if (r.ok) {
+              s.applyWrite(r.data);
+              applyServerValues(s, [r.data.task, ...r.data.ancestors]);
+              setMessage(null);
+              return;
+            }
+            revert();
+            showError(r.message);
+            if (r.code === 'CONFLICT' || r.code === 'NOT_FOUND') refresh();
+          })
+          .catch(() => {
+            revert();
+            showError('저장하지 못했습니다. 네트워크를 확인해 주세요.');
+          })
+          .finally(() => saving.delete(id));
+      });
+
+      // 의존 추가: 사전 검사(UX)는 여기서, 최종 검사(순환·조상 관계)는 서버가 잠금 안에서 다시 한다.
+      api.intercept('add-link', (ev) => {
+        if (ev.eventSource === SERVER) return true;
+        const { store: s, canEdit: editable } = live.current;
+        if (!editable) return false;
+        const link = { source: String(ev.link.source), target: String(ev.link.target), type: String(ev.link.type ?? 'e2s') };
+        const readonlyProjects = new Set(s.projects.filter((p) => p.archived).map((p) => p.id));
+        const rejection = validateLink(link, { tasks: s.tasks, readonlyProjects, deps: s.deps });
+        if (rejection) {
+          showError(LINK_REJECTION_MESSAGES[rejection]);
+          return false;
+        }
+        return true;
+      });
+      api.on('add-link', (ev) => {
+        if (ev.eventSource === SERVER) return;
+        const tempId = ev.id;
+        const fromTaskId = String(ev.link.source);
+        const toTaskId = String(ev.link.target);
+        const s = live.current.store;
+        const dropTemp = () => {
+          if (tempId !== undefined) api.exec('delete-link', { id: tempId, eventSource: SERVER });
+        };
+        void addDependency({ fromTaskId, toTaskId })
+          .then((r) => {
+            dropTemp();
+            if (!r.ok) {
+              showError(r.message);
+              if (r.code === 'NOT_FOUND' || (r.code === 'CONFLICT' && /보관/.test(r.message))) refresh();
+              return;
+            }
+            s.addDependency(r.data);
+            api.exec('add-link', { id: r.data.id, link: { id: r.data.id, source: fromTaskId, target: toTaskId, type: 'e2s' }, eventSource: SERVER });
+            setMessage(null);
+          })
+          .catch(() => {
+            dropTemp();
+            showError('저장하지 못했습니다. 네트워크를 확인해 주세요.');
+          });
+      });
+
+      // 의존 삭제(막대의 삭제 단추): 서버에서 지운 뒤에만 화면에서 뺀다.
+      api.intercept('delete-link', (ev) => {
+        if (ev.eventSource === SERVER) return true;
+        const { store: s, canEdit: editable } = live.current;
+        const id = String(ev.id);
+        const dep = s.deps.find((d) => d.id === id);
+        if (!editable || !dep) return false;
+        const ends = [s.task(dep.fromTaskId), s.task(dep.toTaskId)];
+        if (ends.some((t) => !t || s.isReadonlyProject(t.projectId))) {
+          showError(LINK_REJECTION_MESSAGES.readonly);
+          return false;
+        }
+        void removeDependency({ id }).then((r) => {
+          if (r.ok || r.code === 'NOT_FOUND') {
+            s.removeDependency(id);
+            api.exec('delete-link', { id, eventSource: SERVER });
+            if (r.ok) setMessage(null);
+            else showError(r.message);
+            return;
+          }
+          showError(r.message);
+        });
+        return false;
+      });
     },
-    [openEditor],
+    [openEditor, refresh, showError],
   );
+
+  /** 대화상자의 의존 삭제 */
+  async function removeDependencyFromDialog(id: string) {
+    const r = await removeDependency({ id });
+    if (!r.ok && r.code !== 'NOT_FOUND') return r;
+    store.removeDependency(id);
+    rebuild();
+    return r.ok ? null : r;
+  }
 
   function onSaved(result: TaskWriteResult) {
     store.applyWrite(result);
@@ -153,11 +317,18 @@ export function TimelineView({ data, canEdit, initialFilter, initialZoom, scope 
   const writableProjects = store.projects.filter((p) => !p.archived && (scope.kind === 'all' || p.id === scope.projectId));
   const editing = dialog.open && dialog.taskId ? store.task(dialog.taskId) ?? null : null;
   const taskList = dialog.open ? store.taskList() : [];
+  const editingDeps: DependencyItem[] = editing
+    ? store.deps.flatMap((d): DependencyItem[] => {
+        if (d.toTaskId === editing.id) return [{ id: d.id, direction: 'pred', title: store.tasks.get(d.fromTaskId)?.title ?? '(보이지 않는 작업)' }];
+        if (d.fromTaskId === editing.id) return [{ id: d.id, direction: 'succ', title: store.tasks.get(d.toTaskId)?.title ?? '(보이지 않는 작업)' }];
+        return [];
+      })
+    : [];
   const defaultProjectId =
     scope.kind === 'project' ? scope.projectId : (store.projects.find((p) => p.key === filter.projectKey && !p.archived)?.id ?? undefined);
 
   return (
-    <div className="flex h-[calc(100vh-3rem)] flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-sm">
         <div className="flex items-center gap-1" role="group" aria-label="줌">
           {ZOOMS.map((z) => (
@@ -210,7 +381,7 @@ export function TimelineView({ data, canEdit, initialFilter, initialZoom, scope 
         </select>
         {scope.kind === 'all' ? (
           <label className="flex items-center gap-1.5">
-            <input type="checkbox" checked={scope.includeArchived} onChange={(e) => toggleArchived(e.target.checked)} />
+            <input type="checkbox" checked={archivedChecked} onChange={(e) => toggleArchived(e.target.checked)} />
             보관 포함
           </label>
         ) : null}
@@ -261,6 +432,8 @@ export function TimelineView({ data, canEdit, initialFilter, initialZoom, scope 
           users={store.users}
           defaultProjectId={defaultProjectId}
           descendantCount={editing ? store.descendantsOf(editing.id).length : 0}
+          dependencies={editingDeps}
+          onRemoveDependency={removeDependencyFromDialog}
           today={store.today}
           onSaved={onSaved}
           onDeleted={onDeleted}

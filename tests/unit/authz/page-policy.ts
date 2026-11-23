@@ -10,6 +10,6 @@ export const PAGE_POLICY: Record<string, PagePolicy> = {
   'src/app/(auth)/change-password/page.tsx': { min: 'VIEWER', allowPasswordChange: true },
   'src/app/(main)/timeline/page.tsx': { min: 'VIEWER' },
   'src/app/(main)/projects/page.tsx': { min: 'VIEWER' },
+  'src/app/(main)/projects/[key]/page.tsx': { min: 'VIEWER' },
   'src/app/admin/users/page.tsx': { min: 'ADMIN' },
-  'src/app/poc/gantt/page.tsx': { min: 'ADMIN' },
 };

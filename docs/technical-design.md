@@ -481,7 +481,6 @@ export async function updateTask(input: unknown): Promise<ActionResult<TaskDto>>
 | `LOCAL_LOGIN_ENABLED` | `true`/`false`. `false` 면 로컬 전용 계정(admin)의 남은 세션도 즉시 무효 |
 | `CLIENT_IP_HEADER` | (선택) 클라이언트 IP 헤더 이름, 기본 `x-real-ip`. 프록시가 덮어쓰는 헤더만 지정 |
 | `APP_DB_PASSWORD`, `MIGRATOR_DB_PASSWORD`, `BACKUP_DB_PASSWORD` | DB 역할별 비밀번호(`openssl rand -hex 24`) |
-| `ENABLE_POC` | (선택) 간트 PoC 화면, 기본 `false` |
 | `TZ` | `Asia/Seoul` |
 
 저장소에는 값 없는 `.env.example` 만 둔다.
