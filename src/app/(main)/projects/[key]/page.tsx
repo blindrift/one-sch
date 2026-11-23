@@ -1,10 +1,11 @@
+import { ChartGantt, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Badge } from '@/components/ui/badge';
+import { AppShell, ViewTabs } from '@/components/app-shell';
 import { isZoom } from '@/components/gantt/scales';
 import { EMPTY_FILTER } from '@/components/gantt/timeline-store';
+import { ProjectStatusBadge } from '@/components/project-status-badge';
 import { hasRole } from '@/lib/roles';
-import { PROJECT_STATUS_LABELS } from '@/lib/schedule/status';
 import { PROJECT_KEY_RE } from '@/lib/validation/limits';
 import { requirePage } from '@/server/auth/require-role';
 import { findProjectByKey, loadTimeline } from '@/server/services/timeline-service';
@@ -26,24 +27,28 @@ export default async function ProjectPage({
   const sp = await searchParams;
   const data = await loadTimeline({ projectId: project.id });
 
+  const title = (
+    <>
+      <Link href="/projects" className="shrink-0 text-[13px] text-text-subtle transition-colors hover:text-foreground">
+        프로젝트
+      </Link>
+      <ChevronRight className="size-3.5 shrink-0 text-text-subtle" aria-hidden />
+      <span className="size-3 shrink-0 rounded-[4px]" style={{ background: project.color }} aria-hidden />
+      <h1 className="truncate text-[15px] font-semibold">
+        <span className="font-mono text-text-subtle">{project.key}</span> {project.name}
+      </h1>
+      <ProjectStatusBadge status={project.status} />
+      {project.archived ? (
+        <span className="inline-flex h-5 shrink-0 items-center rounded-full border border-line bg-surface-muted px-2 text-xs text-muted-foreground">
+          보관(읽기 전용)
+        </span>
+      ) : null}
+    </>
+  );
+
   return (
-    <main className="flex h-[calc(100vh-3rem)] flex-col">
-      <div className="flex items-center gap-3 border-b px-4 py-2">
-        <span className="inline-block size-3 rounded-sm" style={{ background: project.color }} aria-hidden />
-        <h1 className="font-semibold">
-          <span className="font-mono">{project.key}</span> {project.name}
-        </h1>
-        <Badge variant="outline">{PROJECT_STATUS_LABELS[project.status]}</Badge>
-        {project.archived ? <Badge variant="secondary">보관(읽기 전용)</Badge> : null}
-        <nav className="ml-4 flex gap-1 text-sm" aria-label="프로젝트 탭">
-          <span className="rounded-md bg-muted px-2 py-1 font-medium" aria-current="page">
-            간트
-          </span>
-        </nav>
-        <Link href="/projects" className="ml-auto text-sm text-muted-foreground underline-offset-4 hover:underline">
-          프로젝트 목록
-        </Link>
-      </div>
+    <AppShell me={me} fill title={title}>
+      <ViewTabs label="프로젝트 탭" tabs={[{ label: '간트', icon: <ChartGantt className="size-3.5" aria-hidden />, active: true }]} />
       <TimelineView
         data={data}
         canEdit={hasRole(me.role, 'MEMBER')}
@@ -51,6 +56,6 @@ export default async function ProjectPage({
         initialZoom={isZoom(sp.zoom) ? sp.zoom : 'day'}
         scope={{ kind: 'project', projectId: project.id }}
       />
-    </main>
+    </AppShell>
   );
 }

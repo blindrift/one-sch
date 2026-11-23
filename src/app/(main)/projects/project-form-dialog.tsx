@@ -1,5 +1,6 @@
 'use client';
 
+import { Pencil, Plus } from 'lucide-react';
 import { useState, useTransition } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -16,7 +17,7 @@ type Props =
   | { mode: 'create'; users: UserOption[]; defaultOwnerId: string; project?: undefined }
   | { mode: 'edit'; users: UserOption[]; project: ProjectDto; defaultOwnerId?: undefined };
 
-const DEFAULT_COLOR = '#2563eb';
+const DEFAULT_COLOR = '#7b68ee';
 
 function FieldErrors({ errors }: { errors?: string[] }) {
   return errors?.map((m) => (
@@ -72,14 +73,18 @@ export function ProjectFormDialog(props: Props) {
     >
       <DialogTrigger asChild>
         {mode === 'create' ? (
-          <Button>프로젝트 만들기</Button>
+          <Button>
+            <Plus aria-hidden />
+            프로젝트 만들기
+          </Button>
         ) : (
           <Button variant="outline" size="sm" aria-label={`${project.key} 수정`}>
+            <Pencil aria-hidden />
             수정
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>키는 만든 뒤 바꿀 수 없습니다(이슈 번호에 쓰입니다).</DialogDescription>
@@ -100,7 +105,7 @@ export function ProjectFormDialog(props: Props) {
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="project-color">색</Label>
-              <Input id="project-color" name="color" type="color" defaultValue={project?.color ?? DEFAULT_COLOR} className="h-9 p-1" />
+              <Input id="project-color" name="color" type="color" defaultValue={project?.color ?? DEFAULT_COLOR} className="h-8 cursor-pointer p-1" />
               <FieldErrors errors={error?.fields.color} />
             </div>
             <div className="flex flex-col gap-1.5">
