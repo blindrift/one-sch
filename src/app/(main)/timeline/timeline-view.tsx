@@ -2,9 +2,9 @@
 
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { IApi } from '@svar-ui/react-gantt';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { ChevronDown, ChevronsDownUp, ChevronsUpDown, CircleAlert, Info, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { dragPatch, isProjectRow, LINK_REJECTION_MESSAGES, projectRowId, rowValues, validateLink } from '@/components/gantt/adapter';
 import { presetForRow } from '@/components/gantt/drag-create';
@@ -15,7 +15,7 @@ import { isLate } from '@/lib/schedule/rollup';
 import { TASK_STATUSES, TASK_STATUS_LABELS, type TaskStatus } from '@/lib/schedule/status';
 import { addDependency, removeDependency } from '@/server/actions/dependency';
 import { updateTask } from '@/server/actions/task';
-import { SELECT_CLASS, TaskFormDialog, type DependencyItem, type TaskPreset } from './task-form-dialog';
+import { TaskFormDialog, type DependencyItem, type TaskPreset } from './task-form-dialog';
 
 // SVAR 는 브라우저 전용(window 사용)이라 서버 렌더를 끈다. ssr:false 는 클라이언트 컴포넌트 안에서만 쓸 수 있다.
 const GanttChart = dynamic(() => import('@/components/gantt/gantt-chart'), {
@@ -346,35 +346,36 @@ export function TimelineView({ data, canEdit, initialFilter, initialZoom, scope 
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-sm">
-        <div className="flex items-center gap-1" role="group" aria-label="줌">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line bg-background px-4 py-2 text-sm">
+        <div className="inline-flex items-center rounded-lg border border-line bg-surface-muted p-0.5" role="group" aria-label="줌">
           {ZOOMS.map((z) => (
-            <Button key={z} type="button" size="sm" variant={zoom === z ? 'default' : 'outline'} aria-pressed={zoom === z} onClick={() => changeZoom(z)}>
+            <button
+              key={z}
+              type="button"
+              aria-pressed={zoom === z}
+              onClick={() => changeZoom(z)}
+              className={
+                zoom === z
+                  ? 'h-7 min-w-9 rounded-md bg-background px-2.5 text-xs font-semibold text-brand shadow-sm'
+                  : 'h-7 min-w-9 rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground'
+              }
+            >
               {ZOOM_LABELS[z]}
-            </Button>
+            </button>
           ))}
         </div>
+        <span className="mx-1 h-5 w-px bg-line" aria-hidden />
         {scope.kind === 'all' ? (
-          <select
-            aria-label="프로젝트 필터"
-            className={`${SELECT_CLASS} w-44`}
-            value={filter.projectKey ?? ''}
-            onChange={(e) => changeFilter({ projectKey: e.target.value || null })}
-          >
+          <FilterSelect label="프로젝트 필터" width="w-44" value={filter.projectKey ?? ''} onChange={(v) => changeFilter({ projectKey: v || null })}>
             <option value="">모든 프로젝트</option>
             {store.projects.map((p) => (
               <option key={p.id} value={p.key}>
                 [{p.key}] {p.name}
               </option>
             ))}
-          </select>
+          </FilterSelect>
         ) : null}
-        <select
-          aria-label="담당자 필터"
-          className={`${SELECT_CLASS} w-36`}
-          value={filter.assigneeId ?? ''}
-          onChange={(e) => changeFilter({ assigneeId: e.target.value || null })}
-        >
+        <FilterSelect label="담당자 필터" width="w-36" value={filter.assigneeId ?? ''} onChange={(v) => changeFilter({ assigneeId: v || null })}>
           <option value="">모든 담당자</option>
           <option value={UNASSIGNED}>(담당자 없음)</option>
           {store.users.map((u) => (
@@ -382,55 +383,65 @@ export function TimelineView({ data, canEdit, initialFilter, initialZoom, scope 
               {u.name}
             </option>
           ))}
-        </select>
-        <select
-          aria-label="상태 필터"
-          className={`${SELECT_CLASS} w-32`}
-          value={filter.status ?? ''}
-          onChange={(e) => changeFilter({ status: (e.target.value || null) as TaskStatus | null })}
-        >
+        </FilterSelect>
+        <FilterSelect label="상태 필터" width="w-32" value={filter.status ?? ''} onChange={(v) => changeFilter({ status: (v || null) as TaskStatus | null })}>
           <option value="">모든 상태</option>
           {TASK_STATUSES.map((s) => (
             <option key={s} value={s}>
               {TASK_STATUS_LABELS[s]}
             </option>
           ))}
-        </select>
+        </FilterSelect>
         {scope.kind === 'all' ? (
-          <label className="flex items-center gap-1.5">
-            <input type="checkbox" checked={archivedChecked} onChange={(e) => toggleArchived(e.target.checked)} />
+          <label className="flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-surface-muted">
+            <input type="checkbox" className="size-3.5 accent-[var(--brand)]" checked={archivedChecked} onChange={(e) => toggleArchived(e.target.checked)} />
             보관 포함
           </label>
         ) : null}
-        <Button type="button" size="sm" variant="ghost" onClick={() => setAllOpen(false)}>
-          모두 접기
-        </Button>
-        <Button type="button" size="sm" variant="ghost" onClick={() => setAllOpen(true)}>
-          모두 펼치기
-        </Button>
-        <span className="text-muted-foreground" data-testid="timeline-count">
+        <span className="mx-1 h-5 w-px bg-line" aria-hidden />
+        <IconButton label="모두 접기" onClick={() => setAllOpen(false)}>
+          <ChevronsDownUp className="size-4" />
+        </IconButton>
+        <IconButton label="모두 펼치기" onClick={() => setAllOpen(true)}>
+          <ChevronsUpDown className="size-4" />
+        </IconButton>
+        <span className="ml-1 text-xs text-muted-foreground tabular-nums" data-testid="timeline-count">
           작업 {view.visibleTaskIds.size.toLocaleString('ko-KR')}건
         </span>
         {canEdit ? (
-          <Button type="button" size="sm" className="ml-auto" disabled={writableProjects.length === 0} onClick={() => setDialog({ open: true, taskId: null })}>
+          <Button
+            type="button"
+            size="sm"
+            className="ml-auto h-8 gap-1.5 rounded-md bg-brand px-3 text-xs font-semibold text-white shadow-sm hover:bg-brand-hover"
+            disabled={writableProjects.length === 0}
+            onClick={() => setDialog({ open: true, taskId: null })}
+          >
+            <Plus className="size-3.5" />
             작업 추가
           </Button>
         ) : null}
       </div>
       {message ? (
-        <Alert
-          variant={message.kind === 'error' ? 'destructive' : 'default'}
+        <div
           role={message.kind === 'error' ? 'alert' : 'status'}
           data-testid="timeline-message"
-          className="mx-4 mt-2 w-auto"
+          className={
+            message.kind === 'error'
+              ? 'mx-4 mt-2 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-700'
+              : 'mx-4 mt-2 flex items-center gap-2 rounded-lg border border-line bg-brand-soft px-3 py-2 text-[13px] text-foreground'
+          }
         >
-          <AlertDescription className="flex items-center justify-between gap-2">
-            <span>{message.text}</span>
-            <button type="button" className="text-xs underline" onClick={() => setMessage(null)}>
-              닫기
-            </button>
-          </AlertDescription>
-        </Alert>
+          {message.kind === 'error' ? <CircleAlert className="size-4 shrink-0" aria-hidden /> : <Info className="size-4 shrink-0 text-brand" aria-hidden />}
+          <span className="flex-1">{message.text}</span>
+          <button
+            type="button"
+            aria-label="닫기"
+            className="inline-flex size-6 items-center justify-center rounded-md opacity-70 hover:bg-black/5 hover:opacity-100"
+            onClick={() => setMessage(null)}
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
       ) : null}
       <div className="min-h-0 flex-1">
         {store.projects.length === 0 ? (
@@ -468,5 +479,53 @@ export function TimelineView({ data, canEdit, initialFilter, initialZoom, scope 
         />
       ) : null}
     </div>
+  );
+}
+
+/** 도구 모음의 작은 회색 드롭다운(네이티브 select: 접근 가능한 이름은 aria-label) */
+function FilterSelect({
+  label,
+  width,
+  value,
+  onChange,
+  children,
+}: {
+  label: string;
+  width: string;
+  value: string;
+  onChange: (value: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className={`relative ${width}`}>
+      <select
+        aria-label={label}
+        className={
+          value
+            ? 'h-8 w-full cursor-pointer appearance-none truncate rounded-md border border-brand/40 bg-brand-soft pr-7 pl-2.5 text-xs font-medium text-brand outline-none focus-visible:ring-2 focus-visible:ring-brand/30'
+            : 'h-8 w-full cursor-pointer appearance-none truncate rounded-md border border-line bg-background pr-7 pl-2.5 text-xs text-muted-foreground outline-none hover:bg-surface-muted focus-visible:ring-2 focus-visible:ring-brand/30'
+        }
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {children}
+      </select>
+      <ChevronDown className="pointer-events-none absolute top-1/2 right-2 size-3.5 -translate-y-1/2 text-text-subtle" aria-hidden />
+    </div>
+  );
+}
+
+/** 아이콘만 있는 작은 단추(이름은 aria-label·title) */
+function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/30 focus-visible:outline-none"
+    >
+      {children}
+    </button>
   );
 }

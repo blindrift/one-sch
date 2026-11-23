@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { Trash2 } from 'lucide-react';
+import { useMemo, useState, useTransition, type ReactNode } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -8,12 +9,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { DependencyDto, ProjectDto, TaskDeleteResult, TaskDto, TaskWriteResult, UserOption } from '@/lib/schedule/dto';
 import { moveCreatesHierarchyDependency, subtreeDependencyPartners } from '@/lib/schedule/graph';
-import { TASK_STATUSES, TASK_STATUS_LABELS, type TaskStatus } from '@/lib/schedule/status';
+import { TASK_STATUSES, TASK_STATUS_COLORS, TASK_STATUS_LABELS, type TaskStatus } from '@/lib/schedule/status';
 import { isHttpUrl, TASK_MEMO_MAX, TASK_URL_MAX, TITLE_MAX } from '@/lib/validation/limits';
 import { createTask, deleteTask, updateTask } from '@/server/actions/task';
 
 export const SELECT_CLASS =
-  'h-9 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50';
+  'h-9 rounded-md border border-input bg-transparent px-2.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50';
 
 export type DependencyItem = { id: string; direction: 'pred' | 'succ'; title: string };
 
@@ -51,16 +52,29 @@ export function TaskFormDialog(props: Props) {
   const { open, onOpenChange, task } = props;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{task ? '작업 수정' : '작업 추가'}</DialogTitle>
-          <DialogDescription>
+      <DialogContent className="max-h-[90vh] gap-5 overflow-y-auto sm:max-w-xl">
+        <DialogHeader className="gap-1">
+          <DialogTitle className="text-base font-semibold">{task ? '작업 수정' : '작업 추가'}</DialogTitle>
+          <DialogDescription className="text-xs">
             {task?.hasChildren ? '하위 작업이 있는 작업의 기간·진행률은 하위 작업에서 자동으로 계산됩니다.' : '날짜는 시작일과 종료일을 포함합니다.'}
           </DialogDescription>
         </DialogHeader>
         {open ? <TaskForm {...props} /> : null}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** 라벨(작게, 회색) + 입력 + 오류. span 이면 두 칸을 다 쓴다 */
+function Field({ id, label, span, errors, children }: { id: string; label: string; span?: boolean; errors?: string[]; children: ReactNode }) {
+  return (
+    <div className={span ? 'col-span-2 flex flex-col gap-1.5' : 'flex min-w-0 flex-col gap-1.5'}>
+      <Label htmlFor={id} className="text-xs font-medium text-muted-foreground">
+        {label}
+      </Label>
+      {children}
+      <FieldErrors errors={errors} />
+    </div>
   );
 }
 
@@ -205,11 +219,21 @@ function TaskForm({
         e.preventDefault();
         submit();
       }}
-      className="flex flex-col gap-3"
+      className="grid grid-cols-2 gap-x-4 gap-y-3.5"
     >
+      <Field id="task-title" label="제목" span errors={fe.title}>
+        <Input
+          id="task-title"
+          className="h-10 text-[15px] font-medium"
+          placeholder="작업 이름"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          required
+          maxLength={TITLE_MAX}
+        />
+      </Field>
       {task ? null : (
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="task-project">프로젝트</Label>
+        <Field id="task-project" label="프로젝트" errors={fe.projectId}>
           <select
             id="task-project"
             className={`${SELECT_CLASS} w-full`}
@@ -226,11 +250,9 @@ function TaskForm({
               </option>
             ))}
           </select>
-          <FieldErrors errors={fe.projectId} />
-        </div>
+        </Field>
       )}
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="task-parent">상위 작업</Label>
+      <Field id="task-parent" label="상위 작업" span={!!task} errors={fe.parentId}>
         <select id="task-parent" className={`${SELECT_CLASS} w-full`} value={parentId} onChange={(e) => setParentId(e.target.value)}>
           <option value="">(없음 — 프로젝트 바로 아래)</option>
           {parentOptions.map((o) => (
@@ -239,78 +261,61 @@ function TaskForm({
             </option>
           ))}
         </select>
-        <FieldErrors errors={fe.parentId} />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="task-title">제목</Label>
-        <Input id="task-title" value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={TITLE_MAX} />
-        <FieldErrors errors={fe.title} />
-      </div>
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={isMilestone}
+      </Field>
+      <Field id="task-start" label={isMilestone ? '날짜' : '시작일'} errors={fe.startDate}>
+        <Input
+          id="task-start"
+          type="date"
+          min="2000-01-01"
+          max="2100-12-31"
+          required
           disabled={summary}
-          onChange={(e) => {
-            setIsMilestone(e.target.checked);
-            if (e.target.checked) setEndDate(startDate);
-          }}
+          value={startDate}
+          onChange={(e) => setStartDate(e.target.value)}
         />
-        마일스톤(하루짜리 기준점)
-      </label>
-      <FieldErrors errors={fe.isMilestone} />
-      <div className="grid grid-cols-2 gap-3">
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="task-start">{isMilestone ? '날짜' : '시작일'}</Label>
+      </Field>
+      {isMilestone ? (
+        <div className="flex flex-col justify-end gap-1.5">
+          <FieldErrors errors={fe.endDate} />
+        </div>
+      ) : (
+        <Field id="task-end" label="종료일" errors={fe.endDate}>
           <Input
-            id="task-start"
+            id="task-end"
             type="date"
             min="2000-01-01"
             max="2100-12-31"
             required
             disabled={summary}
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
           />
-          <FieldErrors errors={fe.startDate} />
-        </div>
-        {isMilestone ? null : (
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="task-end">종료일</Label>
-            <Input
-              id="task-end"
-              type="date"
-              min="2000-01-01"
-              max="2100-12-31"
-              required
-              disabled={summary}
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-            />
-            <FieldErrors errors={fe.endDate} />
-          </div>
-        )}
-      </div>
-      {isMilestone ? <FieldErrors errors={fe.endDate} /> : null}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="task-progress">진행률(%)</Label>
-          <Input
-            id="task-progress"
-            type="number"
-            min={0}
-            max={100}
-            step={1}
-            required
+        </Field>
+      )}
+      <div className="col-span-2 -mt-1 flex flex-col gap-1">
+        <label className="flex w-fit cursor-pointer items-center gap-2 text-[13px] text-foreground has-disabled:cursor-not-allowed has-disabled:opacity-60">
+          <input
+            type="checkbox"
+            className="size-3.5 accent-[var(--brand)]"
+            checked={isMilestone}
             disabled={summary}
-            value={progress}
-            onChange={(e) => setProgress(e.target.value)}
+            onChange={(e) => {
+              setIsMilestone(e.target.checked);
+              if (e.target.checked) setEndDate(startDate);
+            }}
           />
-          <FieldErrors errors={fe.progress} />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="task-status">상태</Label>
-          <select id="task-status" className={`${SELECT_CLASS} w-full`} value={status} onChange={(e) => setStatus(e.target.value as TaskStatus)}>
+          마일스톤(하루짜리 기준점)
+        </label>
+        <FieldErrors errors={fe.isMilestone} />
+      </div>
+      <Field id="task-status" label="상태">
+        <div className="relative">
+          <span
+            className="pointer-events-none absolute top-1/2 left-3 size-2 -translate-y-1/2 rounded-full"
+            style={{ background: TASK_STATUS_COLORS[status] }}
+            aria-hidden
+          />
+          <select id="task-status" className={`${SELECT_CLASS} w-full pl-7`} value={status} onChange={(e) => setStatus(e.target.value as TaskStatus)}>
             {TASK_STATUSES.map((s) => (
               <option key={s} value={s}>
                 {TASK_STATUS_LABELS[s]}
@@ -318,21 +323,31 @@ function TaskForm({
             ))}
           </select>
         </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="task-assignee">담당자</Label>
-          <select id="task-assignee" className={`${SELECT_CLASS} w-full`} value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
-            <option value="">(없음)</option>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
-          </select>
-          <FieldErrors errors={fe.assigneeId} />
-        </div>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="task-url">관련 링크(URL)</Label>
+      </Field>
+      <Field id="task-assignee" label="담당자" errors={fe.assigneeId}>
+        <select id="task-assignee" className={`${SELECT_CLASS} w-full`} value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
+          <option value="">(없음)</option>
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field id="task-progress" label="진행률(%)" errors={fe.progress}>
+        <Input
+          id="task-progress"
+          type="number"
+          min={0}
+          max={100}
+          step={1}
+          required
+          disabled={summary}
+          value={progress}
+          onChange={(e) => setProgress(e.target.value)}
+        />
+      </Field>
+      <Field id="task-url" label="관련 링크(URL)" errors={fe.url}>
         <div className="flex items-center gap-2">
           <Input
             id="task-url"
@@ -348,39 +363,48 @@ function TaskForm({
               href={url.trim()}
               target="_blank"
               rel="noopener noreferrer"
-              className="shrink-0 text-sm text-primary underline underline-offset-4"
+              className="shrink-0 text-xs font-medium text-brand hover:underline"
               data-testid="task-url-open"
             >
               열기
             </a>
           ) : null}
         </div>
-        <FieldErrors errors={fe.url} />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="task-memo">메모</Label>
+      </Field>
+      <Field id="task-memo" label="메모" span errors={fe.memo}>
         <textarea
           id="task-memo"
-          rows={4}
+          rows={3}
           maxLength={TASK_MEMO_MAX}
-          className="min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
+          placeholder="메모를 남겨 주세요"
+          className="min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none placeholder:text-text-subtle focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
           value={memo}
           onChange={(e) => setMemo(e.target.value)}
         />
-        <FieldErrors errors={fe.memo} />
-      </div>
+      </Field>
       {task && dependencies.length ? (
-        <div className="flex flex-col gap-1.5" data-testid="task-dependencies">
-          <span className="text-sm font-medium">의존(완료→시작)</span>
-          <ul className="flex flex-col gap-1 text-sm">
+        <div className="col-span-2 flex flex-col gap-1.5" data-testid="task-dependencies">
+          <span className="text-xs font-medium text-muted-foreground">의존(완료→시작)</span>
+          <ul className="flex flex-col divide-y divide-line rounded-md border border-line text-[13px]">
             {dependencies.map((d) => (
-              <li key={d.id} className="flex items-center justify-between gap-2">
-                <span>
-                  {d.direction === 'pred' ? '선행: ' : '후행: '}
-                  {d.title}
+              <li key={d.id} className="flex items-center justify-between gap-2 py-1 pr-1 pl-3">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="shrink-0 rounded bg-surface-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                    {d.direction === 'pred' ? '선행' : '후행'}
+                    <span className="sr-only">: </span>
+                  </span>
+                  <span className="truncate">{d.title}</span>
                 </span>
                 {onRemoveDependency ? (
-                  <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => removeDependency(d.id)} aria-label={`의존 삭제 ${d.title}`}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs text-muted-foreground hover:text-destructive"
+                    disabled={pending}
+                    onClick={() => removeDependency(d.id)}
+                    aria-label={`의존 삭제 ${d.title}`}
+                  >
                     삭제
                   </Button>
                 ) : null}
@@ -390,12 +414,12 @@ function TaskForm({
         </div>
       ) : null}
       {error ? (
-        <Alert variant="destructive" role="alert" data-testid="task-form-error">
+        <Alert variant="destructive" role="alert" data-testid="task-form-error" className="col-span-2">
           <AlertDescription>{error.message}</AlertDescription>
         </Alert>
       ) : null}
       {confirmDelete ? (
-        <Alert variant="destructive" data-testid="task-delete-confirm">
+        <Alert variant="destructive" data-testid="task-delete-confirm" className="col-span-2">
           <AlertDescription>
             {descendantCount > 0
               ? `하위 작업 ${descendantCount}개와 연결된 의존 관계도 함께 삭제됩니다. 되돌릴 수 없습니다.`
@@ -403,26 +427,34 @@ function TaskForm({
           </AlertDescription>
         </Alert>
       ) : null}
-      <DialogFooter className="gap-2 sm:justify-between">
+      <DialogFooter className="col-span-2 mt-1 gap-2 border-t border-line pt-4 sm:justify-between">
         {task ? (
           confirmDelete ? (
             <div className="flex gap-2">
-              <Button type="button" variant="destructive" disabled={pending} onClick={remove}>
+              <Button type="button" variant="destructive" size="sm" disabled={pending} onClick={remove}>
                 삭제 확인
               </Button>
-              <Button type="button" variant="ghost" disabled={pending} onClick={() => setConfirmDelete(false)}>
+              <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => setConfirmDelete(false)}>
                 취소
               </Button>
             </div>
           ) : (
-            <Button type="button" variant="outline" disabled={pending} onClick={() => setConfirmDelete(true)}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-muted-foreground hover:bg-red-50 hover:text-destructive"
+              disabled={pending}
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Trash2 className="size-3.5" />
               삭제
             </Button>
           )
         ) : (
           <span />
         )}
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" size="sm" className="min-w-20 bg-brand font-semibold text-white hover:bg-brand-hover" disabled={pending}>
           {pending ? '저장 중…' : '저장'}
         </Button>
       </DialogFooter>

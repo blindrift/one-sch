@@ -6,12 +6,12 @@ import type { ComponentProps } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Gantt, Willow, type IApi } from '@svar-ui/react-gantt';
 import { Locale } from '@svar-ui/react-core';
-import { ymdFromLocalDate } from '@/lib/dates';
 import type { GanttLink, GanttRow } from './adapter';
-import { COLUMNS } from './columns';
+import { withCells } from './cells';
+import { COLUMNS, GRID_WIDTH } from './columns';
 import { dayRangeFromX } from './drag-create';
 import { ko } from './ko';
-import { SCALES, type Zoom } from './scales';
+import { dayHighlight, SCALES, type Zoom } from './scales';
 import { TaskBar } from './task-bar';
 import './svar.css';
 import './gantt.css';
@@ -35,6 +35,12 @@ type SelectionBox = { left: number; top: number; width: number; height: number; 
 
 /** 끌기로 보는 최소 이동(px). 이보다 짧으면 단순 클릭으로 둔다 */
 const DRAG_THRESHOLD = 4;
+
+/** 행 높이·머리글 한 줄 높이(px). 막대 위치는 E2E 가 막대 상자로 계산하므로 행 높이에 묶여 있지 않다 */
+const CELL_HEIGHT = 40;
+const SCALE_HEIGHT = 28;
+
+const GRID_COLUMNS = withCells(COLUMNS);
 
 const NO_ROWS: GanttRow[] = [];
 const NO_LINKS: GanttLink[] = [];
@@ -141,7 +147,7 @@ export default function GanttChart({ rows, links, zoom, today, readonly, onInit,
   }, [selectable]);
   const z = SCALES[zoom];
   const highlightTime = useCallback(
-    (date: Date, unit: string) => (unit === 'day' && ymdFromLocalDate(date) === today ? 'og-today' : ''),
+    (date: Date, unit: string) => dayHighlight(date, unit, today),
     [today],
   );
 
@@ -177,8 +183,10 @@ export default function GanttChart({ rows, links, zoom, today, readonly, onInit,
             init={init}
             tasks={(armed ? rows : NO_ROWS) as unknown as GanttProps['tasks']}
             links={armed ? links : NO_LINKS}
-            columns={COLUMNS}
-            gridWidth={560}
+            columns={GRID_COLUMNS}
+            gridWidth={GRID_WIDTH}
+            cellHeight={CELL_HEIGHT}
+            scaleHeight={SCALE_HEIGHT}
             scales={z.scales}
             cellWidth={z.cellWidth}
             lengthUnit="day"

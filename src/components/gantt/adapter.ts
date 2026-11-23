@@ -4,6 +4,7 @@ import { svarEndFromYmd, ymdFromLocalDate, ymdFromSvarEnd, ymdToLocalDate } from
 import type { DependencyDto, ProjectDto, TaskDto, UserOption } from '@/lib/schedule/dto';
 import { createsCycle, isAncestor } from '@/lib/schedule/graph';
 import { isLate, summarize } from '@/lib/schedule/rollup';
+import type { TaskStatus } from '@/lib/schedule/status';
 
 const PROJECT_PREFIX = 'p:';
 export const projectRowId = (projectId: string) => `${PROJECT_PREFIX}${projectId}`;
@@ -30,6 +31,10 @@ export type GanttRow = {
   summary: boolean;
   readonly: boolean;
   assigneeName: string;
+  /** 담당자 id(아바타 색). 없거나 프로젝트 행이면 null */
+  assigneeId: string | null;
+  /** 작업 상태(상태 열). 프로젝트 행은 null */
+  status: TaskStatus | null;
   startYmd: string | null;
   endYmd: string | null;
   /** 관련 링크가 있는지(막대의 🔗 표시) */
@@ -78,6 +83,8 @@ export function taskToRow(t: TaskDto, project: ProjectDto, userNames: ReadonlyMa
     summary: t.hasChildren,
     readonly: project.archived,
     assigneeName: t.assigneeId ? (userNames.get(t.assigneeId) ?? '') : '',
+    assigneeId: t.assigneeId,
+    status: t.status,
     startYmd: t.startDate,
     endYmd: t.endDate,
     hasUrl: !!t.url,
@@ -101,6 +108,8 @@ export function projectToRow(p: ProjectDto, topLevel: readonly TaskDto[], open =
     summary: true,
     readonly: true,
     assigneeName: '',
+    assigneeId: null,
+    status: null,
     startYmd,
     endYmd,
     hasUrl: false,
