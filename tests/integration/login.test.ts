@@ -5,7 +5,7 @@ import { checkIpRate, IP_LIMIT, lockUser, reserveAttempt } from '@/server/auth/l
 import { resetAuditThrottle } from '@/server/audit-throttle';
 import { loadSession } from '@/server/auth/session';
 import { changeOwnPassword, passwordLogin } from '@/server/services/auth-service';
-import { disconnectAll, resetDb } from '../helpers/db';
+import { disconnectAll, resetDb, stringifyRow } from '../helpers/db';
 
 let ipSeq = 0;
 const freshIp = () => `10.0.${Math.floor(++ipSeq / 250)}.${ipSeq % 250}`;
@@ -173,7 +173,7 @@ describe('passwordLogin', () => {
     await passwordLogin({ username: 'admin', password: 'wrong', meta: meta() });
     const logs = await prisma.auditLog.findMany({ where: { action: 'auth.login.failure' }, orderBy: { id: 'asc' } });
     expect(logs[0].after).toEqual({ usernameKnown: false, usernameLength: 18 });
-    expect(JSON.stringify(logs[0])).not.toContain('my-secret-password');
+    expect(stringifyRow(logs[0])).not.toContain('my-secret-password');
     expect(logs[1].after).toEqual({ username: 'admin' });
   });
 });

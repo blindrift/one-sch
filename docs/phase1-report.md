@@ -4,14 +4,14 @@
 |---|---|
 | 브랜치 | `feat/phase1-foundation` |
 | 작성일 | 2026-11-20 |
-| 판정 | **통과 보류** — 코드·단위·운영 compose 검증 완료, 마이그레이션(개발 DB)·통합·E2E 미실행 |
+| 판정 | **통과** (2026-11-23) — 2.2 절 검증 1–7단계 완료. 통합 테스트 결함 2건(테스트 코드)은 수정 |
 
 ## 1. 현재 상태
 
 - 구현: 설계서 12절 1단계 전체 — Next.js 골격, Prisma 스키마(설계서 5절 전 모델), 구글 SSO(허용 목록)·로컬 admin 로그인, 세션, 권한 가드, 보안 헤더·CSP, `/admin/users`, 감사 로그, Docker/compose, 백업 스크립트, 간트 PoC(`docs/gantt-poc.md`).
 - 리뷰: 보안·로직·테스트 리뷰어 3명, 수정·재검토 3회. 최종적으로 Critical·High 결함 0.
 - 확인된 것: 단위 테스트 159건(무작위 순서 포함) 통과, lint·typecheck·build 통과, 운영 의존성 `npm audit` 0건. 권한 검사 회귀 테스트는 우회 코드 29종을 넣어 모두 실패하는 것을 확인. 운영 compose 검증(아래 1.2)도 통과.
-- **아직 실행하지 못한 것**: 개발 DB 마이그레이션과 통합 테스트(약 50건), E2E(14건). `.env.local` 의 `MIGRATE_DATABASE_URL` 인증 실패로 막혀 있다(1.2 참고).
+- 2026-11-23 NAS 에서 남은 3–5단계(마이그레이션·통합·E2E)를 마쳤다(1.2 참고).
 
 ### 1.1 진행 내역
 
@@ -24,6 +24,8 @@
 | 오후 | 재검토 2차: 신규 High 1(정적 검사가 `data`·`out` 폴더를 건너뜀) → 수정 H1–H10(4커밋) |
 | 오후 | 재검토 3차: 신규 결함 없음. 남은 위험 정리 → 이 보고서 작성 |
 | 저녁 | Docker(colima)·Node 22 설치, `.env.local` 작성(구글 제외). 검증 1·2·6·7단계 진행, trivy HIGH 10건 수정(`e288f61`) |
+| 저녁 | PR #1 병합(`7866065`), NAS 운영 compose 기동(`scripts/prod.sh`) |
+| 11-23 | NAS 에서 검증 3·4·5단계. 통합 테스트 2건 실패(테스트가 BigInt 행을 `JSON.stringify`) → `stringifyRow` 헬퍼로 수정 후 전체 통과 |
 
 ### 1.2 검증 결과 (2.2 절 순서 기준)
 
@@ -31,16 +33,16 @@
 |---|---|
 | 1. Node 22 `npm ci` | 통과. 단위 159·lint·typecheck·audit 0 |
 | 2. 개발 DB `db:up`(빈 볼륨) | 통과. 역할 3개, `onesch`·`onesch_test`·`onesch_e2e`, timezone Asia/Seoul |
-| 3. 마이그레이션 | **막힘** — Prisma P1000 `onesch_owner` 인증 실패. DB 쪽 비밀번호는 정상(컨테이너에서 세 계정 로그인 성공)이고 `.env.local` 의 `MIGRATE_DATABASE_URL` 비밀번호 부분이 다르다. 원인 후보: URL 에 `${VAR}` 참조(`process.loadEnvFile` 은 치환하지 않음), 자리표시자 그대로, 또는 셸에 같은 이름 변수가 이미 있음(덮어쓰지 않음) |
-| 4. 통합 테스트 | 미실행(3단계 대기) |
-| 5. E2E | 미실행(3단계 대기) |
+| 3. 마이그레이션 | 통과(NAS). `migrate deploy` 적용, `migrate diff` 무차이, `AuditLog` 앱 `ar`(SELECT·INSERT)만, `_prisma_migrations` 앱 권한 없음. (Mac 에서는 `.env.local` URL 비밀번호 불일치로 P1000 이었음) |
+| 4. 통합 테스트 | 통과. 파일별 6개 → `npm test` 220건(26파일), `--sequence.shuffle` 220건, 강등 동시성 테스트 12회 반복 모두 통과. 처음 실패 2건(`login`·`user-service` 의 감사 행 `JSON.stringify` 가 `AuditLog.id` BigInt 에서 TypeError)은 테스트 코드 결함 — `tests/helpers/db.ts` `stringifyRow` 로 수정 |
+| 5. E2E | 통과. 14건(Chromium) |
 | 6. 운영 compose 리허설 | **통과** — amd64 빌드, Prisma musl·argon2 로드, db read_only+cap_add 첫 초기화 성공(R6 해소), 4개 컨테이너 ReadonlyRootfs·CapDrop ALL·no-new-privileges, db 포트 미노출, app healthy·`/api/health` 200, DB 권한(AuditLog 앱 SELECT·INSERT 만, `_prisma_migrations` 앱 권한 없음, 트리거 2개, owner TRUNCATE·DELETE 거부, 앱 CREATE TABLE 거부), 백업·`pg_restore -l`(함수·트리거·ACL 포함), db 외부 통신 차단, 보안 헤더 |
 | 6. trivy | 처음 HIGH 10건(베이스 이미지의 npm CLI 의존성) → 실행 이미지에서 npm·corepack 제거로 0건(`e288f61`) |
 | 7. SSH 터널 흉내(https `AUTH_URL` + `http://localhost`) | Chromium 성공(로그인→비밀번호 변경→`/admin/users`), **WebKit(Safari) 실패**(`upgrade-insecure-requests` 로 정적 파일을 https 로 요청). 결정: CSP 완화 없이 문서에 Chrome 필수 명시(설계서 10.2) |
 
 참고: brew 의 compose 플러그인을 docker 가 찾도록 `~/.docker/config.json` 에 `cliPluginsExtraDirs` 를 추가했다(저장소 밖 설정).
 
-다음 할 일: `.env.local` URL 5개를 실제 비밀번호로 고친 뒤 3→4→5 단계를 진행하고, 결과에 따라 판정한다.
+NAS 실행 환경 메모: DSM 호스트에서는 Prisma CLI 가 segfault(139)로 죽는다(DSM 의 glibc·OpenSSL 1.1 환경). 그래서 3–5단계는 `mcr.microsoft.com/playwright:v1.65.1-noble` 컨테이너(`--network host`, `node_modules` 는 별도 볼륨, Node 는 `node:22-bookworm-slim` 에서 꺼낸 22.x — 이미지 기본 Node 26 은 `engines` 에 걸림)에서 실행했다. 운영 이미지 빌드는 `scripts/prod.sh build`(BuildKit 없이 `docker build`).
 
 ## 2. 통과 판정을 위한 남은 작업
 

@@ -26,3 +26,8 @@ export async function resetDb(): Promise<void> {
 export async function disconnectAll(): Promise<void> {
   await Promise.all([ownerDb.$disconnect(), appDb.$disconnect(), adminDb.$disconnect()]);
 }
+
+// AuditLog.id 같은 BigInt 컬럼이 있는 행을 문자열로 바꿔 "비밀값이 어디에도 없는지" 검사할 때 쓴다(JSON.stringify 는 BigInt 에서 예외).
+export function stringifyRow(row: unknown): string {
+  return JSON.stringify(row, (_key, value: unknown) => (typeof value === 'bigint' ? value.toString() : value));
+}
