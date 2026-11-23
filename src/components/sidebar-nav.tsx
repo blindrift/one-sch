@@ -7,7 +7,10 @@ import { cn } from 'cn';
 
 export type SidebarProject = { key: string; name: string; color: string };
 
-const ITEM = 'flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13px] transition-colors';
+const ITEM =
+  'flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13px] transition-colors group-data-[collapsed=true]/side:justify-center group-data-[collapsed=true]/side:px-0';
+/** 사이드바를 접으면 숨기는 글자 */
+const LABEL = 'truncate group-data-[collapsed=true]/side:hidden';
 const IDLE = 'text-foreground/80 hover:bg-sidebar-accent hover:text-foreground';
 const ACTIVE = 'bg-brand-soft font-medium text-brand';
 
@@ -24,14 +27,14 @@ export function SidebarNav({ isAdmin, projects }: { isAdmin: boolean; projects: 
     <div className="flex min-h-0 flex-1 flex-col gap-5 px-2 py-3">
       <nav aria-label="주 메뉴" className="flex flex-col gap-0.5">
         {menu.map((m) => (
-          <Link key={m.href} href={m.href} aria-current={m.active ? 'page' : undefined} className={cn(ITEM, m.active ? ACTIVE : IDLE)}>
+          <Link key={m.href} href={m.href} aria-current={m.active ? 'page' : undefined} className={cn(ITEM, m.active ? ACTIVE : IDLE)} title={m.label}>
             <m.icon className={cn('size-4 shrink-0', m.active ? 'text-brand' : 'text-text-subtle')} aria-hidden />
-            {m.label}
+            <span className={LABEL}>{m.label}</span>
           </Link>
         ))}
       </nav>
       <nav aria-label="프로젝트 바로 가기" className="flex min-h-0 flex-1 flex-col">
-        <p className="px-2.5 pb-1.5 text-[11px] font-semibold tracking-wide text-text-subtle">프로젝트</p>
+        <p className="px-2.5 pb-1.5 text-[11px] font-semibold tracking-wide text-text-subtle group-data-[collapsed=true]/side:hidden">프로젝트</p>
         <ul className="-mr-2 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pr-2">
           {projects.length === 0 ? <li className="px-2.5 py-1 text-xs text-text-subtle">활성 프로젝트가 없습니다.</li> : null}
           {projects.map((p) => {
@@ -41,7 +44,7 @@ export function SidebarNav({ isAdmin, projects }: { isAdmin: boolean; projects: 
               <li key={p.key}>
                 <Link href={href} aria-current={active ? 'page' : undefined} className={cn(ITEM, active ? ACTIVE : IDLE)} title={`[${p.key}] ${p.name}`}>
                   <span className="size-2.5 shrink-0 rounded-[3px]" style={{ background: p.color }} aria-hidden />
-                  <span className="truncate">
+                  <span className={LABEL}>
                     <span className={cn('font-mono text-[11px]', active ? 'text-brand' : 'text-text-subtle')}>[{p.key}]</span> {p.name}
                   </span>
                 </Link>

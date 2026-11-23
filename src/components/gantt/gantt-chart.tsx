@@ -2,7 +2,7 @@
 
 // SVAR 간트를 그리는 부분만 둔다(브라우저 전용이라 timeline-view 가 dynamic(ssr:false) 로 불러온다).
 // 이벤트 처리(저장·거부)는 onInit 으로 받은 api 에 timeline-view 가 붙인다.
-import type { ComponentProps } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Gantt, Willow, type IApi } from '@svar-ui/react-gantt';
 import { Locale } from '@svar-ui/react-core';
@@ -28,6 +28,8 @@ export type GanttChartProps = {
   onInit: (api: IApi) => void;
   /** 차트의 빈 곳을 가로로 끌어 놓으면 부른다(rowId: 끌기를 시작한 행, 행 밖이면 null). 없으면 끌기 선택을 끈다. */
   onRangeSelect?: (sel: { rowId: string | null; startDate: string; endDate: string }) => void;
+  /** 막대에 마우스를 올렸을 때 보일 정보 카드 내용(없으면 null) */
+  hoverContent?: (rowId: string) => ReactNode | null;
 };
 
 /** 끌기 중 강조 상자(간트 틀 기준 px) */
@@ -42,10 +44,15 @@ const SCALE_HEIGHT = 28;
 
 const GRID_COLUMNS = withCells(COLUMNS);
 
+/** 정보 카드: 나타나기까지 머무를 시간(ms)·크기(px, 위/아래 배치 판단용) */
+const HOVER_DELAY = 280;
+const HOVER_CARD_WIDTH = 300;
+const HOVER_CARD_HEIGHT = 260;
+
 const NO_ROWS: GanttRow[] = [];
 const NO_LINKS: GanttLink[] = [];
 
-export default function GanttChart({ rows, links, zoom, today, readonly, onInit, onRangeSelect }: GanttChartProps) {
+export default function GanttChart({ rows, links, zoom, today, readonly, onInit, onRangeSelect, hoverContent }: GanttChartProps) {
   const frame = useRef<HTMLDivElement>(null);
   const apiRef = useRef<IApi | null>(null);
   const init = useCallback(
@@ -60,6 +67,89 @@ export default function GanttChart({ rows, links, zoom, today, readonly, onInit,
     selectRef.current = onRangeSelect;
   });
   const [box, setBox] = useState<SelectionBox | null>(null);
+
+  // 막대 정보 카드: 잠깐 머무르면(HOVER_DELAY) 막대 아래(공간이 없으면 위)에 띄운다.
+  // 카드 안으로 마우스를 옮기면 유지한다(링크 클릭). 누르기(드래그 시작)·스크롤·끌기 선택 중에는 닫는다.
+  const hoverRef = useRef(hoverContent);
+  useEffect(() => {
+    hoverRef.current = hoverContent;
+  });
+  const [hover, setHover] = useState<{ id: string; left: number; top: number; above: boolean } | null>(null);
+  useEffect(() => {
+    const root = frame.current;
+    if (!root) return;
+    let showTimer = 0;
+    let hideTimer = 0;
+    let current: string | null = null;
+    let pressed = false;
+    const clear = () => {
+      window.clearTimeout(showTimer);
+      window.clearTimeout(hideTimer);
+    };
+    const close = () => {
+      clear();
+      current = null;
+      setHover(null);
+    };
+    const barOf = (t: EventTarget | null) => (t instanceof Element ? t.closest<HTMLElement>('.wx-bar') : null);
+    const onOver = (e: MouseEvent) => {
+      const t = e.target instanceof Element ? e.target : null;
+      if (t?.closest('.og-hc-wrap')) {
+        window.clearTimeout(hideTimer); // 카드 위: 유지
+        return;
+      }
+      const bar = barOf(t);
+      if (!bar || pressed) return;
+      const id = (bar.dataset.id ?? '').replace(/^:/, '');
+      if (!id || id === current) {
+        window.clearTimeout(hideTimer);
+        return;
+      }
+      clear();
+      const x = e.clientX;
+      showTimer = window.setTimeout(() => {
+        if (pressed || !bar.isConnected || !hoverRef.current?.(id)) return;
+        const f = root.getBoundingClientRect();
+        const b = bar.getBoundingClientRect();
+        const above = f.bottom - b.bottom < HOVER_CARD_HEIGHT && b.top - f.top > f.bottom - b.bottom;
+        const left = Math.min(Math.max(x - f.left - 24, 8), f.width - HOVER_CARD_WIDTH - 8);
+        current = id;
+        setHover({ id, left, top: above ? b.top - f.top - 6 : b.bottom - f.top + 6, above });
+      }, HOVER_DELAY);
+    };
+    const onOut = (e: MouseEvent) => {
+      const to = e.relatedTarget instanceof Element ? e.relatedTarget : null;
+      const from = e.target instanceof Element ? e.target : null;
+      const fromBar = barOf(from);
+      const fromCard = from?.closest('.og-hc-wrap');
+      if (!fromBar && !fromCard) return;
+      if (to && ((fromBar && fromBar.contains(to)) || to.closest('.og-hc-wrap') || (fromCard && barOf(to)?.dataset.id === `:${current}`))) return;
+      window.clearTimeout(showTimer);
+      hideTimer = window.setTimeout(close, 120);
+    };
+    const onDown = (e: MouseEvent) => {
+      if (e.target instanceof Element && e.target.closest('.og-hc-wrap')) return;
+      pressed = true;
+      close();
+    };
+    const onUp = () => {
+      pressed = false;
+    };
+    root.addEventListener('mouseover', onOver);
+    root.addEventListener('mouseout', onOut);
+    root.addEventListener('mousedown', onDown, true);
+    root.addEventListener('wheel', close, { passive: true });
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      clear();
+      root.removeEventListener('mouseover', onOver);
+      root.removeEventListener('mouseout', onOut);
+      root.removeEventListener('mousedown', onDown, true);
+      root.removeEventListener('wheel', close);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, []);
+  const hoverNode = hover ? (hoverContent?.(hover.id) ?? null) : null;
   const selectable = !readonly && !!onRangeSelect;
 
   // 진행률 칸은 한 번 눌러 바로 고친다. SVAR 표는 더블클릭에만 편집기를 열므로, 칸 클릭을 더블클릭으로 넘긴다.
@@ -197,6 +287,14 @@ export default function GanttChart({ rows, links, zoom, today, readonly, onInit,
           />
         </Willow>
       </Locale>
+      {hover && hoverNode && !box ? (
+        <div
+          className={hover.above ? 'og-hc-wrap og-hc-above' : 'og-hc-wrap'}
+          style={{ left: hover.left, top: hover.top, width: HOVER_CARD_WIDTH }}
+        >
+          {hoverNode}
+        </div>
+      ) : null}
       {box ? (
         <div
           className="og-range"

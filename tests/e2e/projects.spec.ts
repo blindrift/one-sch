@@ -25,7 +25,7 @@ test('MEMBER: /projects 에서 생성 → 목록·타임라인에 표시 → 수
   // 타임라인: 프로젝트 행(작업이 없어 프로젝트 기간으로 막대, D16)
   await gotoTimeline(page);
   await expect(page.getByTestId('gantt').getByText('[NEWP] 신규 프로젝트').first()).toBeVisible();
-  await expect(page.getByTestId('gantt').getByText('2026-11-10 ~ 2026-11-20')).toBeVisible();
+  await expect(page.getByTestId('gantt').getByText('11.10 ~ 11.20')).toBeVisible();
   await expect(bar(page, `p:${project.id}`)).toBeVisible();
 
   // 수정

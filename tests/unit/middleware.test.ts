@@ -40,6 +40,15 @@ describe('middleware', () => {
     expect(nonceOf(a)).not.toBe(nonceOf(b));
   });
 
+  it('사이드바 접힘 쿠키를 x-og-sidebar 요청 헤더로 넘긴다(정해진 두 값만)', () => {
+    vi.stubEnv('AUTH_URL', 'http://localhost:3000');
+    const head = (cookie: string) => middleware(req('/timeline', { cookie })).headers.get('x-middleware-request-x-og-sidebar');
+    expect(head('authjs.session-token=abc; og-sidebar=collapsed')).toBe('collapsed');
+    expect(head('authjs.session-token=abc; og-sidebar=open')).toBe('open');
+    expect(head('authjs.session-token=abc; og-sidebar=<script>')).toBe('open');
+    expect(head('authjs.session-token=abc')).toBe('open');
+  });
+
   it('GET 페이지 요청만 쿠키 만료를 연장한다(POST·/api/ 제외)', () => {
     vi.stubEnv('AUTH_URL', 'http://localhost:3000');
     const cookie = 'authjs.session-token=abc';

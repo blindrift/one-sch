@@ -54,16 +54,13 @@ export function StatusCell({ row }: CellProps) {
   );
 }
 
-/** 담당자 열: 이니셜 원형 아바타 + 이름 */
+/** 담당자 열: 이니셜 원형 아바타만(이름은 마우스를 올리면·정보 카드에서) */
 export function AssigneeCell({ row }: CellProps) {
   if (row.kind === 'project') return null;
-  if (!row.assigneeName || !row.assigneeId) return <span className="og-avatar og-avatar-empty" aria-hidden />;
+  if (!row.assigneeName || !row.assigneeId) return <span className="og-avatar og-avatar-empty" title="담당자 없음" aria-label="담당자 없음" />;
   return (
-    <span className="og-assignee">
-      <span className="og-avatar" style={{ background: avatarColor(row.assigneeId) }} aria-hidden>
-        {initials(row.assigneeName)}
-      </span>
-      <span className="og-assignee-name">{row.assigneeName}</span>
+    <span className="og-avatar" style={{ background: avatarColor(row.assigneeId) }} title={row.assigneeName} aria-label={`담당자 ${row.assigneeName}`}>
+      {initials(row.assigneeName)}
     </span>
   );
 }

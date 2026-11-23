@@ -6,8 +6,9 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode
 import type { IApi } from '@svar-ui/react-gantt';
 import { ChevronDown, ChevronsDownUp, ChevronsUpDown, CircleAlert, Info, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { dragPatch, isProjectRow, LINK_REJECTION_MESSAGES, projectRowId, rowValues, validateLink } from '@/components/gantt/adapter';
+import { dragPatch, isProjectRow, projectIdOfRow, LINK_REJECTION_MESSAGES, projectRowId, rowValues, validateLink } from '@/components/gantt/adapter';
 import { presetForRow } from '@/components/gantt/drag-create';
+import { ProjectHoverCard, TaskHoverCard, type HoverSource } from '@/components/gantt/hover-card';
 import { ZOOMS, ZOOM_LABELS, type Zoom } from '@/components/gantt/scales';
 import { TimelineStore, UNASSIGNED, type TimelineFilter } from '@/components/gantt/timeline-store';
 import type { TaskDeleteResult, TaskDto, TaskWriteResult, TimelineData } from '@/lib/schedule/dto';
@@ -310,6 +311,31 @@ export function TimelineView({ data, canEdit, initialFilter, initialZoom, scope 
     [showError],
   );
 
+  /** 막대 정보 카드 내용(작업·프로젝트 행) */
+  const hoverContent = useCallback(
+    (rowId: string) => {
+      const list = store.taskList();
+      const src: HoverSource = {
+        task: (id) => store.task(id),
+        project: (id) => store.projects.find((p) => p.id === id),
+        users: store.users,
+        deps: store.deps,
+        childCount: (id) => list.filter((t) => t.parentId === id).length,
+        today: store.today,
+        canEdit,
+      };
+      if (isProjectRow(rowId)) {
+        const project = src.project(projectIdOfRow(rowId));
+        return project ? <ProjectHoverCard project={project} tasks={list} src={src} /> : null;
+      }
+      const task = store.task(rowId);
+      return task ? <TaskHoverCard task={task} src={src} /> : null;
+    },
+    // revision: 사본 안의 값이 바뀌면 다시 만든다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [store, canEdit, revision],
+  );
+
   /** 대화상자의 의존 삭제 */
   async function removeDependencyFromDialog(id: string) {
     const r = await removeDependency({ id });
@@ -455,6 +481,7 @@ export function TimelineView({ data, canEdit, initialFilter, initialZoom, scope 
             readonly={!canEdit}
             onInit={onInit}
             onRangeSelect={canEdit && writableProjects.length > 0 ? onRangeSelect : undefined}
+            hoverContent={hoverContent}
           />
         )}
       </div>

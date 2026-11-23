@@ -1,5 +1,5 @@
 import type { IColumnConfig } from '@svar-ui/react-gantt';
-import type { GanttRow } from './adapter';
+import { shortRange, type GanttRow } from './adapter';
 
 const PROGRESS_EDITOR = { type: 'text', config: { type: 'number', min: 0, max: 100, step: 5 } } as const;
 
@@ -9,7 +9,7 @@ export function progressEditable(row: Pick<GanttRow, 'type' | 'readonly'>): bool
 }
 
 /** 왼쪽 표 너비(열 너비의 합). 작업 열은 남는 폭을 가져간다 */
-export const GRID_WIDTH = 700;
+export const GRID_WIDTH = 560;
 
 /**
  * 왼쪽 표의 열(설계 6.1: 작업·상태·담당자·기간·진행률). 기본 열은 날짜를 DD-MM-YYYY 로 보여 주므로 직접 정의한다.
@@ -17,19 +17,19 @@ export const GRID_WIDTH = 700;
  */
 export const COLUMNS: IColumnConfig[] = [
   { id: 'text', header: '작업', flexgrow: 1, width: 220 },
-  { id: 'status', header: '상태', width: 92 },
-  { id: 'assigneeName', header: '담당자', width: 112 },
+  { id: 'status', header: '상태', width: 88 },
+  // 담당자는 아바타만(이름은 마우스를 올리면). 기간은 연도 없이 짧게(연도는 머리글·정보 카드에서 본다)
+  { id: 'assigneeName', header: '담당', width: 60, align: 'center' },
   {
     id: 'range',
     header: '기간',
-    width: 172,
-    template: (_v: unknown, row: GanttRow) =>
-      !row.startYmd ? '' : row.type === 'milestone' || row.startYmd === row.endYmd ? row.startYmd : `${row.startYmd} ~ ${row.endYmd}`,
+    width: 104,
+    template: (_v: unknown, row: GanttRow) => (!row.startYmd ? '' : shortRange(row.startYmd, row.type === 'milestone' ? row.startYmd : (row.endYmd ?? row.startYmd))),
   },
   {
     id: 'progress',
     header: '진행률',
-    width: 104,
+    width: 92,
     // 칸을 눌러 바로 고친다(저장은 막대 드래그와 같은 update-task 경로). 프로젝트 행·요약(D4)·보관(D6) 행은 고칠 수 없다.
     editor: (row: GanttRow) => (progressEditable(row) ? PROGRESS_EDITOR : null),
   },
