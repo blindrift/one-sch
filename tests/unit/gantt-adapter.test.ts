@@ -187,3 +187,22 @@ describe('관련 링크·메모 표시', () => {
     expect(memoPreview('x'.repeat(MEMO_PREVIEW_MAX + 1))).toBe(`${'x'.repeat(MEMO_PREVIEW_MAX)}…`);
   });
 });
+
+describe('진행률 표 편집', () => {
+  it('progressEditable: 일반 작업·마일스톤만, 요약·읽기 전용(프로젝트 행·보관)은 아님', async () => {
+    const { progressEditable } = await import('@/components/gantt/columns');
+    expect(progressEditable({ type: 'task', readonly: false })).toBe(true);
+    expect(progressEditable({ type: 'milestone', readonly: false })).toBe(true);
+    expect(progressEditable({ type: 'summary', readonly: false })).toBe(false);
+    expect(progressEditable({ type: 'task', readonly: true })).toBe(false);
+  });
+
+  it('dragPatch: 표에서 온 문자열 숫자는 반올림·0–100, 숫자가 아니거나 빈 값이면 진행률을 바꾸지 않는다', async () => {
+    const { dragPatch } = await import('@/components/gantt/adapter');
+    const before = { startDate: '2026-11-10', endDate: '2026-11-12', progress: 10, isMilestone: false };
+    expect(dragPatch(before, { progress: '55.6' as unknown as number })).toEqual({ progress: 56 });
+    expect(dragPatch(before, { progress: 150 })).toEqual({ progress: 100 });
+    expect(dragPatch(before, { progress: 'abc' as unknown as number })).toEqual({});
+    expect(dragPatch(before, { progress: '' as unknown as number })).toEqual({});
+  });
+});

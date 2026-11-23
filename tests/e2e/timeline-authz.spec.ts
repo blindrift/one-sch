@@ -45,6 +45,10 @@ test('VIEWER: 타임라인·프로젝트 화면은 보이고 추가·수정 단�
   await dragEmpty(page, vb.y + vb.height / 2, vb.x + vb.width + 3 * DAY_CELL, vb.x + vb.width + 6 * DAY_CELL);
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByTestId('gantt-range')).toHaveCount(0);
+  // 진행률 칸을 눌러도 입력칸이 열리지 않는다
+  await page.locator('.wx-row', { hasText: '보기 작업' }).locator('[data-col-id=":progress"]').click();
+  await page.waitForTimeout(300);
+  await expect(page.locator('.wx-row', { hasText: '보기 작업' }).locator('.wx-editor')).toHaveCount(0);
   await actions.settle();
   expect(actions.count()).toBe(0);
   expect(await datesOf(t.id)).toBe('2026-11-10~2026-11-14:0');
