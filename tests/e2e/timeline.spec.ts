@@ -92,6 +92,9 @@ test('빈 곳을 끌어 작업 추가: 끈 날짜·행(형제/하위)으로 대�
   const parent = await createTask(p.id, { title: '상위', start: '2026-11-10', end: '2026-11-12' });
   await createTask(p.id, { title: '하위', start: '2026-11-10', end: '2026-11-12', parentId: parent.id });
   await injectSession(context, m.id);
+  // 왼쪽 사이드바(240px)만큼 차트가 좁아져 1280px 에서는 11-23 칸 오른쪽 끝이 차트 밖으로 잘린다(강조 상자도 잘림).
+  // 상자 너비를 정확히 재려고 끈 칸 전체가 보이는 너비로 연다.
+  await page.setViewportSize({ width: 1600, height: 800 });
   await gotoTimeline(page, '/projects/DRC');
   const dlg = page.getByRole('dialog');
   const box = (await bar(page, top.id).boundingBox())!; // 11-10 칸의 왼쪽
