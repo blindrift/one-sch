@@ -83,6 +83,10 @@
 }
 
 /* 빈 곳 끌기로 작업 추가: 끌 수 있는 곳은 십자 커서, 끄는 동안 고른 날짜를 강조한다 */
+/* 강조 상자(.og-range, absolute)의 기준. 틀 높이(h-full)는 그대로 두고 위치 기준만 만든다 */
+.og-gantt {
+  position: relative;
+}
 .og-gantt.og-selectable .wx-area {
   cursor: crosshair;
 }
