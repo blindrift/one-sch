@@ -25,8 +25,13 @@ const ROUTE_SEGMENT_CONFIG = new Set(['dynamic', 'dynamicParams', 'revalidate', 
 const HTTP_METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
 /** 가드 없이 열어 둔 route handler(정확히 이 파일들만) */
 const PUBLIC_ROUTES = new Set(['src/app/api/auth/[...nextauth]/route.ts', 'src/app/api/health/route.ts']);
-/** requirePage 없이 열어 둔 page(로그인 화면, 리디렉션만 하는 루트) */
-const PUBLIC_PAGES = new Set(['src/app/(auth)/login/page.tsx', 'src/app/page.tsx']);
+/** requirePage 없이 열어 둔 page(로그인 화면, 리디렉션만 하는 루트, 구글 동의 화면용 소개·개인정보처리방침) */
+const PUBLIC_PAGES = new Set([
+  'src/app/(auth)/login/page.tsx',
+  'src/app/page.tsx',
+  'src/app/(public)/about/page.tsx',
+  'src/app/(public)/privacy/page.tsx',
+]);
 /** 데이터 접근을 하면 안 되는 App Router 특수 파일(파일 이름) */
 const NON_GUARDED_SPECIAL = /\/(layout|template|default|not-found|error|global-error|loading|forbidden|unauthorized)\.(ts|tsx|js|jsx|mjs)$/;
 /** 가드를 붙일 수 없는 메타데이터 라우트 — 필요해지면 그때 규칙을 만든다 */
