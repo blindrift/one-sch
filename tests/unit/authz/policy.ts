@@ -24,6 +24,10 @@ export const ACTION_POLICY: Record<string, Policy> = {
   'project.createProject': { min: 'MEMBER' },
   'project.updateProject': { min: 'MEMBER' },
   'project.setProjectArchived': { min: 'MEMBER' },
+
+  'task.createTask': { min: 'MEMBER' },
+  'task.updateTask': { min: 'MEMBER' },
+  'task.deleteTask': { min: 'MEMBER' },
 };
 
 export const PUBLIC_ACTIONS = Object.entries(ACTION_POLICY)

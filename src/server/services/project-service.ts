@@ -7,7 +7,7 @@ import { diffFields, writeAudit } from '../audit';
 import { prisma, type Tx } from '../db';
 import type { RequestMeta } from '../request-meta';
 import { conflict, ensureActiveUser, toProjectDto, validation, type Actor, type ProjectDto } from './schedule-dto';
-import { lockProject } from './schedule-lock';
+import { lockProject, SCHEDULE_TX } from './schedule-lock';
 
 const ymdOrNull = (v: string | null | undefined) => (v ? parseYmd(v) : null);
 
@@ -56,7 +56,7 @@ export async function createProject(actor: Actor, input: CreateProjectInput, met
         meta,
       });
       return dto;
-    });
+    }, SCHEDULE_TX);
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       const message = '이미 쓰고 있는 키입니다.';
@@ -110,7 +110,7 @@ export async function updateProject(actor: Actor, input: UpdateProjectInput, met
       meta,
     });
     return toProjectDto(await tx.project.findUniqueOrThrow({ where: { id: current.id } }));
-  });
+  }, SCHEDULE_TX);
 }
 
 /** 보관/보관 해제(D1: 프로젝트는 실제로 지우지 않는다). */
@@ -135,5 +135,5 @@ export async function setProjectArchived(actor: Actor, input: SetProjectArchived
       meta,
     });
     return toProjectDto(await tx.project.findUniqueOrThrow({ where: { id: current.id } }));
-  });
+  }, SCHEDULE_TX);
 }
