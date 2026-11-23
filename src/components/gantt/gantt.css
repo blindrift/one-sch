@@ -476,3 +476,177 @@
   color: #fff;
   box-shadow: var(--shadow-sm);
 }
+
+/* 좁은 막대(하루짜리 등): 제목을 막대 오른쪽 바깥에 진한 글자로 쓴다. 진행률 끌기 손잡이는 숨긴다(정보 카드·표에서 본다) */
+.og-gantt .og-bar-text.og-bar-text-out {
+  position: absolute;
+  top: 0;
+  left: 100%;
+  overflow: visible;
+  padding-inline: 14px 0; /* 막대 끝의 의존 연결 점(○)과 겹치지 않게 */
+  color: var(--text);
+  font-weight: 500;
+}
+.og-gantt .wx-bar:has(.og-narrow) .wx-progress-marker {
+  display: none;
+}
+
+/* 막대 정보 카드 */
+.og-gantt .og-hc-wrap {
+  position: absolute;
+  z-index: 30;
+  pointer-events: auto;
+}
+.og-gantt .og-hc-wrap.og-hc-above {
+  transform: translateY(-100%);
+}
+.og-hc {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.45;
+  animation: og-hc-in 120ms ease-out;
+}
+@keyframes og-hc-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
+}
+.og-hc-project {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.og-hc-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.og-hc-title {
+  font-size: 14px;
+  font-weight: 600;
+  word-break: break-all;
+}
+.og-hc-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.og-hc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c, var(--text-subtle)) 13%, #fff);
+  color: color-mix(in srgb, var(--c, var(--text-subtle)) 80%, #111);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.og-hc-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--c);
+}
+.og-hc-badge.og-hc-late {
+  --c: var(--status-blocked);
+}
+.og-hc-badge.og-hc-plain {
+  --c: var(--text-subtle);
+}
+.og-hc-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.og-hc-row {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+.og-hc-label {
+  color: var(--text-subtle);
+  font-size: 11.5px;
+}
+.og-hc-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.og-hc-muted {
+  color: var(--text-subtle);
+}
+.og-hc-late-text {
+  color: var(--status-blocked);
+}
+.og-hc-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.og-hc-progress-track {
+  position: relative;
+  width: 120px;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eceef1;
+}
+.og-hc-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: var(--brand);
+}
+.og-hc-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.og-hc-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+}
+.og-hc-link {
+  color: var(--brand);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.og-hc-memo {
+  display: -webkit-box;
+  max-height: 6.2em;
+  overflow: hidden;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+.og-hc-hint {
+  color: var(--text-subtle);
+  font-size: 11px;
+}

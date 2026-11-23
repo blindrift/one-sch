@@ -206,3 +206,12 @@ describe('진행률 표 편집', () => {
     expect(dragPatch(before, { progress: '' as unknown as number })).toEqual({});
   });
 });
+
+describe('shortRange (표의 짧은 기간)', () => {
+  it('MM.DD ~ MM.DD, 하루면 MM.DD, 연도를 넘어도 연도 없이', async () => {
+    const { shortRange } = await import('@/components/gantt/adapter');
+    expect(shortRange('2026-11-14', '2026-11-20')).toBe('11.14 ~ 11.20');
+    expect(shortRange('2026-11-25', '2026-11-25')).toBe('11.25');
+    expect(shortRange('2026-12-28', '2027-01-03')).toBe('12.28 ~ 01.03');
+  });
+});

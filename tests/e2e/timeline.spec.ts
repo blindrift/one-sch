@@ -67,10 +67,10 @@ test('작업·하위 작업·마일스톤을 대화상자로 만든다 → YYYY-
   // 부모는 하위에서 다시 계산된다(D4)
   expect(await taskDates(parent.id)).toBe('2026-11-14~2026-11-20');
   const gantt = page.getByTestId('gantt');
-  await expect(gantt.getByText('2026-11-14 ~ 2026-11-20')).toHaveCount(2); // 부모·하위
-  await expect(gantt.getByText('2026-11-25', { exact: true })).toBeVisible(); // 마일스톤
-  await expect(gantt.getByText('2026-11-14 ~ 2026-11-25')).toBeVisible(); // 프로젝트 요약
-  await expect(gantt.getByText('김멤버', { exact: true })).toBeVisible();
+  await expect(gantt.getByText('11.14 ~ 11.20')).toHaveCount(2); // 부모·하위
+  await expect(gantt.getByText('11.25', { exact: true })).toBeVisible(); // 마일스톤
+  await expect(gantt.getByText('11.14 ~ 11.25')).toBeVisible(); // 프로젝트 요약
+  await expect(gantt.getByTitle('김멤버')).toBeVisible(); // 담당자 아바타(이름은 title)
 
   const pb = (await bar(page, parent.id).boundingBox())!;
   const cb = (await bar(page, child.id).boundingBox())!;
@@ -81,7 +81,7 @@ test('작업·하위 작업·마일스톤을 대화상자로 만든다 → YYYY-
   // 새로고침 뒤에도 같다
   await page.reload();
   await page.locator('[data-testid="gantt"][data-ready="true"]').waitFor();
-  await expect(page.getByTestId('gantt').getByText('2026-11-14 ~ 2026-11-20')).toHaveCount(2);
+  await expect(page.getByTestId('gantt').getByText('11.14 ~ 11.20')).toHaveCount(2);
   expect(await auditActions()).toEqual(expect.arrayContaining(['task.create']));
 });
 
@@ -185,6 +185,56 @@ test('진행률 칸을 눌러 바로 고친다 → 저장·상위 재계산, 요
   expect((await auditActions()).filter((x) => x === 'task.update')).toHaveLength(2);
 });
 
+test('하루짜리 막대: 제목은 막대 밖에 보이고, 마우스를 올리면 정보 카드(상태·기간·담당자·진행률·메모)', async ({ page, context }) => {
+  const m = await createUser('MEMBER', '김담당');
+  const p = await createProject(m.id, { key: 'ONE', name: '한칸' });
+  const t = await createTask(p.id, { title: '연간 AI 보고', start: '2026-11-20', end: '2026-11-20', progress: 30, assigneeId: m.id, status: 'IN_PROGRESS' });
+  await ownerDb.task.update({ where: { id: t.id }, data: { memo: '임원 보고용 요약 1쪽' } });
+  await injectSession(context, m.id);
+  await gotoTimeline(page, '/projects/ONE');
+
+  // 32px 막대 안에 다 들어가지 않으므로 막대 밖에 온전한 제목
+  const out = bar(page, t.id).locator('.og-bar-text-out');
+  await expect(out).toHaveText(/연간 AI 보고/);
+  const ob = (await out.boundingBox())!;
+  const bb = (await bar(page, t.id).boundingBox())!;
+  expect(ob.x).toBeGreaterThanOrEqual(bb.x + bb.width - 1);
+
+  await bar(page, t.id).hover();
+  const card = page.getByTestId('hover-card');
+  await expect(card).toBeVisible();
+  for (const text of ['[ONE] 한칸', '연간 AI 보고', '진행 중', '2026-11-20', '(1일)', '30%', '김담당', '임원 보고용 요약 1쪽', '더블클릭하여 수정']) {
+    await expect(card).toContainText(text);
+  }
+  // 누르면(드래그 시작) 카드는 닫힌다
+  await page.mouse.down();
+  await expect(card).toHaveCount(0);
+  await page.mouse.up();
+});
+
+test('사이드바 접기·펼치기: 접으면 아이콘만, 새로고침해도 유지', async ({ page, context }) => {
+  const m = await createUser('MEMBER');
+  await createProject(m.id, { key: 'SIDE', name: '사이드' });
+  await injectSession(context, m.id);
+  await gotoTimeline(page);
+  const side = page.getByTestId('sidebar');
+  await expect(side).toHaveAttribute('data-collapsed', 'false');
+  const wide = (await side.boundingBox())!.width;
+
+  await page.getByRole('button', { name: '사이드바 접기' }).click();
+  await expect(side).toHaveAttribute('data-collapsed', 'true');
+  await expect.poll(async () => (await side.boundingBox())!.width).toBeLessThan(wide / 2);
+  await expect(side.getByText('타임라인', { exact: true })).toBeHidden();
+  await expect(side.getByRole('link', { name: '타임라인' })).toBeVisible(); // 아이콘 링크는 남는다
+
+  await page.reload();
+  await page.locator('[data-testid="gantt"][data-ready="true"]').waitFor();
+  await expect(side).toHaveAttribute('data-collapsed', 'true');
+  await page.getByRole('button', { name: '사이드바 펼치기' }).click();
+  await expect(side).toHaveAttribute('data-collapsed', 'false');
+  await expect(side.getByText('타임라인', { exact: true })).toBeVisible();
+});
+
 test('막대를 +3일 끌고 오른쪽 끝을 +2일 늘린 뒤 새로고침 → DB·화면 유지, 감사 task.update', async ({ page, context }) => {
   const m = await createUser('MEMBER');
   const p = await createProject(m.id, { key: 'DRG' });
@@ -195,15 +245,15 @@ test('막대를 +3일 끌고 오른쪽 끝을 +2일 늘린 뒤 새로고침 → 
 
   await dragBar(page, bar(page, t.id), 3 * DAY_CELL, 'move');
   await expect.poll(() => taskDates(t.id)).toBe('2026-11-13~2026-11-17');
-  await expect(gantt.getByText('2026-11-13 ~ 2026-11-17')).toHaveCount(2); // 작업·프로젝트 요약
+  await expect(gantt.getByText('11.13 ~ 11.17')).toHaveCount(2); // 작업·프로젝트 요약
 
   await dragBar(page, bar(page, t.id), 2 * DAY_CELL, 'end');
   await expect.poll(() => taskDates(t.id)).toBe('2026-11-13~2026-11-19');
-  await expect(gantt.getByText('2026-11-13 ~ 2026-11-19')).toHaveCount(2);
+  await expect(gantt.getByText('11.13 ~ 11.19')).toHaveCount(2);
 
   await page.reload();
   await page.locator('[data-testid="gantt"][data-ready="true"]').waitFor();
-  await expect(page.getByTestId('gantt').getByText('2026-11-13 ~ 2026-11-19')).toHaveCount(2);
+  await expect(page.getByTestId('gantt').getByText('11.13 ~ 11.19')).toHaveCount(2);
   const row = await ownerDb.task.findUniqueOrThrow({ where: { id: t.id } });
   expect(row.version).toBe(2);
   expect((await auditActions()).filter((a) => a === 'task.update')).toHaveLength(2);
@@ -227,7 +277,7 @@ test('충돌: 다른 곳에서 version 이 오른 뒤 드래그 → 저장 거�
 
   await expect(formError(page, 'timeline-message')).toContainText('다른 사용자가 먼저 변경했습니다');
   // router.refresh 로 최신 값(11-20~11-22)을 다시 불러온다
-  await expect(page.getByTestId('gantt').getByText('2026-11-20 ~ 2026-11-22')).toBeVisible();
+  await expect(page.getByTestId('gantt').getByText('11.20 ~ 11.22')).toBeVisible();
   await expect.poll(async () => Math.round((await bar(page, t.id).boundingBox())!.x - x0)).toBe(10 * DAY_CELL);
   expect(await taskDates(t.id)).toBe('2026-11-20~2026-11-22');
   expect((await ownerDb.task.findUniqueOrThrow({ where: { id: t.id } })).version).toBe(1);
@@ -300,7 +350,14 @@ test('관련 링크·메모: 대화상자에서 넣고 저장 → DB·막대 표
   expect(t).toMatchObject({ url: 'https://example.com/browse/URL-1', memo });
   const marks = bar(page, t.id).getByTestId('bar-marks');
   await expect(marks).toHaveAttribute('data-has-url', 'true');
-  await expect(marks).toHaveAttribute('title', /메모: 회의록 참고 다음 주 재검토/);
+  // 막대에 마우스를 올리면 정보 카드에 링크·메모가 보인다
+  await bar(page, t.id).hover();
+  const card = page.getByTestId('hover-card');
+  await expect(card).toContainText('링크 작업');
+  await expect(card.getByTestId('hover-card-url')).toHaveAttribute('href', 'https://example.com/browse/URL-1');
+  await expect(card.getByTestId('hover-card-memo')).toHaveText(memo);
+  await page.mouse.move(5, 5);
+  await expect(card).toHaveCount(0);
 
   // 새로고침 뒤 다시 열면 값이 그대로다
   await page.reload();
@@ -412,8 +469,8 @@ test('브라우저 시간대 America/Los_Angeles: 표시 날짜 = DB, 드래그 
     expect(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('America/Los_Angeles');
     await gotoTimeline(page, '/projects/TZLA');
     const gantt = page.getByTestId('gantt');
-    await expect(gantt.getByText('2026-11-10 ~ 2026-11-14')).toBeVisible();
-    await expect(gantt.getByText('2026-11-20', { exact: true })).toBeVisible();
+    await expect(gantt.getByText('11.10 ~ 11.14')).toBeVisible();
+    await expect(gantt.getByText('11.20', { exact: true })).toBeVisible();
     // 막대 위치도 날짜와 맞는다: 마일스톤(11-20 0시) 중심 − 작업 시작(11-10 0시) = 10칸, 작업 너비(11-10~11-14 포함) = 5칸
     const tb = (await bar(page, t.id).boundingBox())!;
     const mb = (await bar(page, ms.id).boundingBox())!;
@@ -422,7 +479,7 @@ test('브라우저 시간대 America/Los_Angeles: 표시 날짜 = DB, 드래그 
 
     await dragBar(page, bar(page, t.id), 3 * DAY_CELL, 'move');
     await expect.poll(() => taskDates(t.id)).toBe('2026-11-13~2026-11-17');
-    await expect(gantt.getByText('2026-11-13 ~ 2026-11-17')).toBeVisible();
+    await expect(gantt.getByText('11.13 ~ 11.17')).toBeVisible();
   } finally {
     await context.close();
   }

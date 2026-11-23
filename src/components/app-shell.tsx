@@ -1,6 +1,8 @@
 import { LogOut } from 'lucide-react';
 import Link from 'next/link';
+import { headers } from 'next/headers';
 import { BrandMark } from '@/components/brand-mark';
+import { SidebarFrame } from '@/components/sidebar-frame';
 import { SidebarNav, type SidebarProject } from '@/components/sidebar-nav';
 import { ROLE_LABELS } from '@/lib/roles';
 import { logout } from '@/server/actions/auth';
@@ -35,23 +37,29 @@ export async function AppShell({
 }) {
   const list = projects ?? (await listProjects());
   const active = list.filter((p) => !p.archived).map(({ key, name, color }) => ({ key, name, color }));
+  // middleware 가 og-sidebar 쿠키를 x-og-sidebar 헤더로 넘긴다(cookies() 로는 보이지 않을 수 있다)
+  const collapsed = (await headers()).get('x-og-sidebar') === 'collapsed';
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background">
-      <aside className="flex w-60 shrink-0 flex-col border-r border-line bg-surface-muted">
-        <Link href="/timeline" className="flex h-12 shrink-0 items-center gap-2.5 px-4 hover:bg-sidebar-accent/60">
-          <BrandMark className="size-6 rounded-md text-xs" />
-          <span className="text-[15px] font-semibold tracking-tight">one-sch</span>
-        </Link>
+      <SidebarFrame
+        initialCollapsed={collapsed}
+        brand={
+          <Link href="/timeline" className="flex h-9 items-center gap-2.5 rounded-md px-2 hover:bg-sidebar-accent/60">
+            <BrandMark className="size-6 rounded-md text-xs" />
+            <span className="text-[15px] font-semibold tracking-tight">one-sch</span>
+          </Link>
+        }
+      >
         <SidebarNav isAdmin={me.role === 'ADMIN'} projects={active} />
-        <div className="flex shrink-0 items-center gap-2.5 border-t border-line px-3 py-2.5">
+        <div className="flex shrink-0 items-center gap-2.5 border-t border-line px-3 py-2.5 group-data-[collapsed=true]/side:flex-col group-data-[collapsed=true]/side:px-0">
           <span
             aria-hidden
             className="flex size-7 shrink-0 items-center justify-center rounded-full bg-brand-soft text-xs font-semibold text-brand"
           >
             {me.name.slice(0, 1)}
           </span>
-          <div className="flex min-w-0 flex-1 flex-col leading-tight">
+          <div className="flex min-w-0 flex-1 flex-col leading-tight group-data-[collapsed=true]/side:hidden">
             <span className="truncate text-[13px] font-medium">{me.name}</span>
             <span className="text-[11px] text-text-subtle">{ROLE_LABELS[me.role]}</span>
           </div>
@@ -66,7 +74,7 @@ export async function AppShell({
             </button>
           </form>
         </div>
-      </aside>
+      </SidebarFrame>
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line bg-background px-4">
           <div className="flex min-w-0 flex-1 items-center gap-2.5">{title}</div>

@@ -43,6 +43,12 @@ export type GanttRow = {
   memoPreview: string;
 };
 
+/** 표의 짧은 기간: `MM.DD ~ MM.DD`(하루면 `MM.DD`). 연도는 빼고 앞 0 은 둔다(열 정렬). */
+export function shortRange(start: string, end: string): string {
+  const md = (ymd: string) => `${ymd.slice(5, 7)}.${ymd.slice(8, 10)}`;
+  return start === end ? md(start) : `${md(start)} ~ ${md(end)}`;
+}
+
 /** 막대 title 에 넣을 메모 앞부분 길이 */
 export const MEMO_PREVIEW_MAX = 100;
 

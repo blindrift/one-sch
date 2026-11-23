@@ -4,14 +4,12 @@ import type { CSSProperties } from 'react';
 import type { GanttRow } from './adapter';
 
 /**
- * 관련 링크(🔗)·메모(📝)가 있으면 작은 표시. title 로 메모 앞부분을 보여 준다(React 텍스트로만 렌더).
- * 막대 글자는 pointer-events 가 꺼져 있어 이 표시만 켠다(마우스 다운은 막대로 올라가 드래그는 그대로 된다).
+ * 관련 링크(🔗)·메모(📝)가 있으면 작은 표시. 자세한 내용은 막대에 마우스를 올리면 뜨는 정보 카드(hover-card)가 보여 준다.
  */
 function Marks({ data }: { data: Partial<GanttRow> }) {
   if (!data.hasUrl && !data.memoPreview) return null;
-  const title = [data.hasUrl ? '관련 링크 있음' : '', data.memoPreview ? `메모: ${data.memoPreview}` : ''].filter(Boolean).join('\n');
   return (
-    <span className="og-bar-marks" title={title} data-testid="bar-marks" data-has-url={data.hasUrl ? 'true' : undefined} data-has-memo={data.memoPreview ? 'true' : undefined}>
+    <span className="og-bar-marks" data-testid="bar-marks" data-has-url={data.hasUrl ? 'true' : undefined} data-has-memo={data.memoPreview ? 'true' : undefined}>
       {data.hasUrl ? '🔗' : ''}
       {data.memoPreview ? '📝' : ''}
     </span>
@@ -22,7 +20,16 @@ function Marks({ data }: { data: Partial<GanttRow> }) {
  * 막대 안 내용. 색은 막대 전체를 덮는 배경(진행률 채움 아래)으로, 글자는 그 위에 그린다.
  * 지연·읽기 전용은 클래스와 data 속성(E2E 용)으로 표시한다.
  */
-export function TaskBar({ data }: { data: Partial<GanttRow> }) {
+/** 막대 안에 제목을 다 쓰는 데 필요한 대략의 너비(px): 한글·전각 12px, 그 밖 7px + 좌우 여백·표시 */
+export function labelWidth(data: Pick<Partial<GanttRow>, 'text' | 'hasUrl' | 'memoPreview'>): number {
+  let w = 22;
+  for (const ch of data.text ?? '') w += ch.charCodeAt(0) > 0x2e80 ? 12 : 7;
+  if (data.hasUrl) w += 14;
+  if (data.memoPreview) w += 14;
+  return w;
+}
+
+export function TaskBar({ data }: { data: Partial<GanttRow> & { $w?: number } }) {
   // 기간이 없는 프로젝트(작업·기간 모두 없음, D16): 막대를 숨긴다(gantt.css 의 .og-unscheduled).
   if (!data.startYmd) return <span className="og-unscheduled" data-bar-id={data.id} />;
   if (data.type === 'milestone') {
@@ -40,13 +47,15 @@ export function TaskBar({ data }: { data: Partial<GanttRow> }) {
   const shape = data.kind === 'project' ? 'og-bracket' : data.type === 'summary' ? 'og-soft' : 'og-solid';
   const cls = ['og-bar-bg', shape, data.late ? 'og-late' : '', data.readonly && data.kind === 'task' ? 'og-readonly' : ''].filter(Boolean).join(' ');
   const color = { '--bar': data.color } as CSSProperties;
+  // 막대가 글자보다 좁으면(하루짜리 등) 제목을 막대 오른쪽 바깥에 쓴다
+  const narrow = shape !== 'og-bracket' && (data.$w ?? Infinity) < labelWidth(data);
   return (
     <>
-      <span className={cls} style={color} data-bar-id={data.id} data-late={data.late ? 'true' : undefined}>
+      <span className={narrow ? `${cls} og-narrow` : cls} style={color} data-bar-id={data.id} data-late={data.late ? 'true' : undefined}>
         {shape === 'og-soft' ? <span className="og-soft-fill" style={{ width: `${data.progress ?? 0}%` }} /> : null}
       </span>
       {shape === 'og-bracket' ? null : (
-        <span className={shape === 'og-soft' ? 'og-bar-text og-bar-text-soft' : 'og-bar-text'} style={color}>
+        <span className={narrow ? 'og-bar-text og-bar-text-out' : shape === 'og-soft' ? 'og-bar-text og-bar-text-soft' : 'og-bar-text'} style={color}>
           <Marks data={data} />
           {data.text}
         </span>
