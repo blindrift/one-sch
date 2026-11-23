@@ -29,6 +29,8 @@ const task = (over: Partial<TaskDto> & { id: string }): TaskDto => ({
   isMilestone: false,
   sortOrder: 1,
   version: 0,
+  url: null,
+  memo: null,
   hasChildren: false,
   ...over,
 });
@@ -147,6 +149,15 @@ describe('TimelineStore', () => {
     expect(s.deps.map((d) => d.id)).toEqual(['d1', 'd2', 'd3']);
     s.removeDependency('d1');
     expect(s.deps.map((d) => d.id)).toEqual(['d2', 'd3']);
+  });
+
+  it('폼 저장 결과의 url·memo 가 사본과 막대 행에 반영되고, null 로 지우면 표시가 사라진다', () => {
+    const s = new TimelineStore(data());
+    s.applyWrite({ task: task({ id: 'c', parentId: 'a', sortOrder: 3, version: 1, url: 'https://example.com', memo: '메모' }), ancestors: [] });
+    expect(s.task('c')).toMatchObject({ url: 'https://example.com', memo: '메모', version: 1 });
+    expect(s.view(EMPTY_FILTER).rows.find((r) => r.id === 'c')).toMatchObject({ hasUrl: true, memoPreview: '메모' });
+    s.applyWrite({ task: task({ id: 'c', parentId: 'a', sortOrder: 3, version: 2 }), ancestors: [] });
+    expect(s.view(EMPTY_FILTER).rows.find((r) => r.id === 'c')).toMatchObject({ hasUrl: false, memoPreview: '' });
   });
 });
 

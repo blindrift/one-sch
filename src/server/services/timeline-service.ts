@@ -53,6 +53,8 @@ export async function loadTimeline(query: TimelineQuery = {}): Promise<TimelineD
         isMilestone: true,
         sortOrder: true,
         version: true,
+        url: true,
+        memo: true,
       },
       orderBy: [{ projectId: 'asc' }, { sortOrder: 'asc' }],
     }),

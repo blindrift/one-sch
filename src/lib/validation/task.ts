@@ -1,6 +1,14 @@
 import { z } from 'zod';
 import { TASK_STATUSES } from '../schedule/status';
-import { TITLE_MAX, UNSAFE_TEXT_MESSAGE, UNSAFE_TEXT_RE } from './limits';
+import {
+  isHttpUrl,
+  TASK_MEMO_MAX,
+  TASK_URL_MAX,
+  TITLE_MAX,
+  UNSAFE_MEMO_RE,
+  UNSAFE_TEXT_MESSAGE,
+  UNSAFE_TEXT_RE,
+} from './limits';
 import { checkDateOrder, id, nullableId, version, ymd } from './schedule-common';
 
 const title = z
@@ -9,6 +17,23 @@ const title = z
   .min(1, '제목을 입력해 주세요.')
   .max(TITLE_MAX, `제목은 ${TITLE_MAX}자 이하입니다.`)
   .refine((v) => !UNSAFE_TEXT_RE.test(v), UNSAFE_TEXT_MESSAGE);
+/** 관련 링크: trim 뒤 빈 문자열·null 은 null, http/https 만 허용(javascript:·data: 등 거부) */
+const url = z
+  .string()
+  .trim()
+  .max(TASK_URL_MAX, `링크는 ${TASK_URL_MAX}자 이하입니다.`)
+  .refine((v) => !UNSAFE_TEXT_RE.test(v), UNSAFE_TEXT_MESSAGE)
+  .refine((v) => v === '' || isHttpUrl(v), 'http:// 또는 https:// 로 시작하는 주소만 쓸 수 있습니다.')
+  .transform((v) => v || null)
+  .nullable();
+/** 메모: 여러 줄 평문. trim 뒤 빈 문자열·null 은 null. 줄바꿈·탭 외의 제어 문자는 거부 */
+const memo = z
+  .string()
+  .trim()
+  .max(TASK_MEMO_MAX, `메모는 ${TASK_MEMO_MAX}자 이하입니다.`)
+  .refine((v) => !UNSAFE_MEMO_RE.test(v), UNSAFE_TEXT_MESSAGE)
+  .transform((v) => v || null)
+  .nullable();
 const progress = z.number().int('진행률은 정수입니다.').min(0).max(100);
 const status = z.enum(TASK_STATUSES);
 
@@ -29,6 +54,8 @@ export const createTaskSchema = z
     status: status.default('TODO'),
     assigneeId: nullableId('잘못된 담당자입니다.').optional(),
     isMilestone: z.boolean().default(false),
+    url: url.optional(),
+    memo: memo.optional(),
   })
   .superRefine((v, ctx) => {
     checkDateOrder(ctx, v.startDate, v.endDate);
@@ -51,6 +78,8 @@ export const updateTaskSchema = z
     assigneeId: nullableId('잘못된 담당자입니다.').optional(),
     isMilestone: z.boolean().optional(),
     parentId: nullableId('잘못된 상위 작업입니다.').optional(),
+    url: url.optional(),
+    memo: memo.optional(),
   })
   .superRefine((v, ctx) => {
     checkDateOrder(ctx, v.startDate, v.endDate);

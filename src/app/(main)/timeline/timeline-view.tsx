@@ -7,6 +7,7 @@ import type { IApi } from '@svar-ui/react-gantt';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { dragPatch, isProjectRow, LINK_REJECTION_MESSAGES, projectRowId, rowValues, validateLink } from '@/components/gantt/adapter';
+import { presetForRow } from '@/components/gantt/drag-create';
 import { ZOOMS, ZOOM_LABELS, type Zoom } from '@/components/gantt/scales';
 import { TimelineStore, UNASSIGNED, type TimelineFilter } from '@/components/gantt/timeline-store';
 import type { TaskDeleteResult, TaskDto, TaskWriteResult, TimelineData } from '@/lib/schedule/dto';
@@ -14,7 +15,7 @@ import { isLate } from '@/lib/schedule/rollup';
 import { TASK_STATUSES, TASK_STATUS_LABELS, type TaskStatus } from '@/lib/schedule/status';
 import { addDependency, removeDependency } from '@/server/actions/dependency';
 import { updateTask } from '@/server/actions/task';
-import { SELECT_CLASS, TaskFormDialog, type DependencyItem } from './task-form-dialog';
+import { SELECT_CLASS, TaskFormDialog, type DependencyItem, type TaskPreset } from './task-form-dialog';
 
 // SVAR 는 브라우저 전용(window 사용)이라 서버 렌더를 끈다. ssr:false 는 클라이언트 컴포넌트 안에서만 쓸 수 있다.
 const GanttChart = dynamic(() => import('@/components/gantt/gantt-chart'), {
@@ -36,7 +37,7 @@ export type TimelineViewProps = {
 };
 
 type Message = { kind: 'error' | 'info'; text: string };
-type DialogState = { open: false } | { open: true; taskId: string | null };
+type DialogState = { open: false } | { open: true; taskId: string | null; preset?: TaskPreset };
 
 export function TimelineView({ data, canEdit, initialFilter, initialZoom, scope }: TimelineViewProps) {
   const router = useRouter();
@@ -293,6 +294,22 @@ export function TimelineView({ data, canEdit, initialFilter, initialZoom, scope 
     [openEditor, refresh, showError],
   );
 
+  /** 차트의 빈 곳을 끌어 놓으면: 끈 날짜와 시작한 행(프로젝트·상위)으로 채운 추가 대화상자를 연다 */
+  const onRangeSelect = useCallback(
+    (sel: { rowId: string | null; startDate: string; endDate: string }) => {
+      const { store: s, canEdit: editable } = live.current;
+      if (!editable) return;
+      const where = presetForRow(sel.rowId, s);
+      if (where === 'readonly') {
+        showError('보관된 프로젝트에는 작업을 추가할 수 없습니다.');
+        return;
+      }
+      setMessage(null);
+      setDialog({ open: true, taskId: null, preset: { ...(where ?? {}), startDate: sel.startDate, endDate: sel.endDate } });
+    },
+    [showError],
+  );
+
   /** 대화상자의 의존 삭제 */
   async function removeDependencyFromDialog(id: string) {
     const r = await removeDependency({ id });
@@ -419,7 +436,15 @@ export function TimelineView({ data, canEdit, initialFilter, initialZoom, scope 
         {store.projects.length === 0 ? (
           <p className="p-6 text-sm text-muted-foreground">표시할 프로젝트가 없습니다. 프로젝트 화면에서 먼저 만들어 주세요.</p>
         ) : (
-          <GanttChart rows={view.rows} links={view.links} zoom={zoom} today={store.today} readonly={!canEdit} onInit={onInit} />
+          <GanttChart
+            rows={view.rows}
+            links={view.links}
+            zoom={zoom}
+            today={store.today}
+            readonly={!canEdit}
+            onInit={onInit}
+            onRangeSelect={canEdit && writableProjects.length > 0 ? onRangeSelect : undefined}
+          />
         )}
       </div>
       {canEdit ? (
@@ -432,6 +457,7 @@ export function TimelineView({ data, canEdit, initialFilter, initialZoom, scope 
           allDependencies={store.deps}
           users={store.users}
           defaultProjectId={defaultProjectId}
+          preset={dialog.open && !dialog.taskId ? dialog.preset : undefined}
           descendantCount={editing ? store.descendantsOf(editing.id).length : 0}
           dependencies={editingDeps}
           onRemoveDependency={removeDependencyFromDialog}

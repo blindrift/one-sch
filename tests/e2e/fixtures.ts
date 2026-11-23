@@ -161,6 +161,14 @@ export async function gotoTimeline(page: Page, path = '/timeline') {
   await page.locator('[data-testid="gantt"][data-ready="true"]').waitFor();
 }
 
+/** 차트의 빈 곳을 (x0,y) 에서 (x1,y) 로 끈다(빈 곳 끌기로 작업 추가). 여러 단계로 움직인다. */
+export async function dragEmpty(page: Page, y: number, x0: number, x1: number) {
+  await page.mouse.move(x0, y);
+  await page.mouse.down();
+  for (let i = 1; i <= 8; i += 1) await page.mouse.move(x0 + ((x1 - x0) * i) / 8, y, { steps: 2 });
+  await page.mouse.up();
+}
+
 /**
  * 막대를 마우스로 끈다. at='move' 는 가운데, 'end' 는 오른쪽 끝(SVAR 는 너비의 마지막 20% 를 끝 늘이기로 본다).
  * 여러 단계로 움직여 SVAR 의 드래그 판정(20px 이상)을 확실히 넘긴다.

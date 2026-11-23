@@ -10,6 +10,7 @@ import {
   DAY_CELL,
   day,
   dragBar,
+  dragEmpty,
   expect,
   formError,
   gotoTimeline,
@@ -82,6 +83,59 @@ test('작업·하위 작업·마일스톤을 대화상자로 만든다 → YYYY-
   await page.locator('[data-testid="gantt"][data-ready="true"]').waitFor();
   await expect(page.getByTestId('gantt').getByText('2026-11-14 ~ 2026-11-20')).toHaveCount(2);
   expect(await auditActions()).toEqual(expect.arrayContaining(['task.create']));
+});
+
+test('빈 곳을 끌어 작업 추가: 끈 날짜·행(형제/하위)으로 대화상자가 채워지고 저장된다, Esc 는 취소', async ({ page, context }) => {
+  const m = await createUser('MEMBER');
+  const p = await createProject(m.id, { key: 'DRC', name: '끌어 만들기' });
+  const top = await createTask(p.id, { title: '기준', start: '2026-11-10', end: '2026-11-12' });
+  const parent = await createTask(p.id, { title: '상위', start: '2026-11-10', end: '2026-11-12' });
+  await createTask(p.id, { title: '하위', start: '2026-11-10', end: '2026-11-12', parentId: parent.id });
+  await injectSession(context, m.id);
+  await gotoTimeline(page, '/projects/DRC');
+  const dlg = page.getByRole('dialog');
+  const box = (await bar(page, top.id).boundingBox())!; // 11-10 칸의 왼쪽
+  const xOf = (dayFrom10: number) => box.x + dayFrom10 * DAY_CELL + DAY_CELL / 2;
+  const yTop = box.y + box.height / 2;
+
+  // 일반 작업(최상위) 행의 빈 곳 11-20 → 11-24: 형제(최상위)로
+  await dragEmpty(page, yTop, xOf(10), xOf(14));
+  await expect(dlg).toBeVisible();
+  await expect(dlg.getByLabel('시작일')).toHaveValue('2026-11-20');
+  await expect(dlg.getByLabel('종료일')).toHaveValue('2026-11-24');
+  await expect(dlg.getByLabel('상위 작업')).toHaveValue('');
+  await dlg.getByLabel('제목').fill('끌어 만든 작업');
+  await dlg.getByRole('button', { name: '저장' }).click();
+  await expect(dlg).toBeHidden();
+  const made = await ownerDb.task.findFirstOrThrow({ where: { projectId: p.id, title: '끌어 만든 작업' } });
+  expect([made.parentId, ymdOf(made.startDate), ymdOf(made.endDate)]).toEqual([null, '2026-11-20', '2026-11-24']);
+  await expect(bar(page, made.id)).toBeVisible();
+
+  // 하위가 있는 작업 행에서 오른쪽→왼쪽으로 끌기: 그 작업의 하위로, 앞이 시작일
+  const pb = (await bar(page, parent.id).boundingBox())!;
+  await dragEmpty(page, pb.y + pb.height / 2, xOf(8), xOf(6));
+  await expect(dlg).toBeVisible();
+  await expect(dlg.getByLabel('시작일')).toHaveValue('2026-11-16');
+  await expect(dlg.getByLabel('종료일')).toHaveValue('2026-11-18');
+  await expect(dlg.getByLabel('상위 작업')).toHaveValue(parent.id);
+  await dlg.getByLabel('제목').fill('끌어 만든 하위');
+  await dlg.getByRole('button', { name: '저장' }).click();
+  await expect(dlg).toBeHidden();
+  const child = await ownerDb.task.findFirstOrThrow({ where: { projectId: p.id, title: '끌어 만든 하위' } });
+  expect(child.parentId).toBe(parent.id);
+  expect(await taskDates(parent.id)).toBe('2026-11-10~2026-11-18'); // 요약 재계산(D4)
+
+  // 끄는 중 Esc: 강조가 사라지고 대화상자도 열리지 않는다. 짧은 클릭도 열리지 않는다
+  await page.mouse.move(xOf(10), yTop);
+  await page.mouse.down();
+  await page.mouse.move(xOf(13), yTop, { steps: 4 });
+  await expect(page.getByTestId('gantt-range')).toContainText('2026-11-20 ~ 2026-11-23');
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('gantt-range')).toHaveCount(0);
+  await page.mouse.up();
+  await page.mouse.click(xOf(16), yTop);
+  await expect(dlg).toHaveCount(0);
+  expect(await ownerDb.task.count({ where: { projectId: p.id } })).toBe(5);
 });
 
 test('막대를 +3일 끌고 오른쪽 끝을 +2일 늘린 뒤 새로고침 → DB·화면 유지, 감사 task.update', async ({ page, context }) => {
@@ -172,6 +226,58 @@ test('의존: 링크를 끌어 추가 → 새로고침 후 유지, 역방향(순
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-link-id]')).toHaveCount(0);
   expect(await auditActions()).toEqual(expect.arrayContaining(['dependency.create', 'dependency.delete']));
+});
+
+test('관련 링크·메모: 대화상자에서 넣고 저장 → DB·막대 표시, 다시 열면 값 유지, javascript: 링크는 거부', async ({ page, context }) => {
+  const m = await createUser('MEMBER');
+  const p = await createProject(m.id, { key: 'URL' });
+  await injectSession(context, m.id);
+  await gotoTimeline(page, '/projects/URL');
+  const dlg = page.getByRole('dialog');
+  const memo = '회의록 참고\n다음 주 재검토';
+
+  await page.getByRole('button', { name: '작업 추가' }).click();
+  await dlg.getByLabel('제목').fill('링크 작업');
+  await dlg.getByLabel('시작일').fill('2026-11-10');
+  await dlg.getByLabel('종료일').fill('2026-11-12');
+  await dlg.getByLabel('관련 링크(URL)').fill('https://example.com/browse/URL-1');
+  await dlg.getByLabel('메모', { exact: true }).fill(memo);
+  const open = dlg.getByTestId('task-url-open');
+  await expect(open).toHaveAttribute('href', 'https://example.com/browse/URL-1');
+  await expect(open).toHaveAttribute('target', '_blank');
+  await expect(open).toHaveAttribute('rel', 'noopener noreferrer');
+  await dlg.getByRole('button', { name: '저장' }).click();
+  await expect(dlg).toBeHidden();
+
+  const t = await ownerDb.task.findFirstOrThrow({ where: { projectId: p.id, title: '링크 작업' } });
+  expect(t).toMatchObject({ url: 'https://example.com/browse/URL-1', memo });
+  const marks = bar(page, t.id).getByTestId('bar-marks');
+  await expect(marks).toHaveAttribute('data-has-url', 'true');
+  await expect(marks).toHaveAttribute('title', /메모: 회의록 참고 다음 주 재검토/);
+
+  // 새로고침 뒤 다시 열면 값이 그대로다
+  await page.reload();
+  await page.locator('[data-testid="gantt"][data-ready="true"]').waitFor();
+  await bar(page, t.id).dblclick();
+  await expect(dlg.getByLabel('관련 링크(URL)')).toHaveValue('https://example.com/browse/URL-1');
+  await expect(dlg.getByLabel('메모', { exact: true })).toHaveValue(memo);
+
+  // javascript: 는 저장되지 않고, 열기 링크도 나오지 않는다
+  await dlg.getByLabel('관련 링크(URL)').fill('javascript:alert(1)');
+  await expect(dlg.getByTestId('task-url-open')).toHaveCount(0);
+  await dlg.getByRole('button', { name: '저장' }).click();
+  await expect(dlg.getByText('http:// 또는 https:// 로 시작하는 주소만 쓸 수 있습니다.').first()).toBeVisible();
+  const after = await ownerDb.task.findUniqueOrThrow({ where: { id: t.id } });
+  expect(after).toMatchObject({ url: 'https://example.com/browse/URL-1', version: t.version });
+
+  // 비우면 null 로 지워진다
+  await dlg.getByLabel('관련 링크(URL)').fill('');
+  await dlg.getByLabel('메모', { exact: true }).fill('   ');
+  await dlg.getByRole('button', { name: '저장' }).click();
+  await expect(dlg).toBeHidden();
+  await expect.poll(async () => (await ownerDb.task.findUniqueOrThrow({ where: { id: t.id } })).url).toBeNull();
+  expect((await ownerDb.task.findUniqueOrThrow({ where: { id: t.id } })).memo).toBeNull();
+  await expect(bar(page, t.id).getByTestId('bar-marks')).toHaveCount(0);
 });
 
 test('줌 일/주/월, 필터(프로젝트·담당자·상태, URL 유지), 접기', async ({ page, context }) => {

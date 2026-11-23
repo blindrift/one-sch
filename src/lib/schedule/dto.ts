@@ -27,6 +27,10 @@ export type TaskDto = {
   isMilestone: boolean;
   sortOrder: number;
   version: number;
+  /** 관련 링크(http/https). 없으면 null */
+  url: string | null;
+  /** 여러 줄 평문 메모. 없으면 null */
+  memo: string | null;
   /** 하위 작업이 있는지(요약 행, D4) */
   hasChildren: boolean;
 };
