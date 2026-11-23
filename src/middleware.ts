@@ -7,7 +7,7 @@ import { SESSION_IDLE_SECONDS, isHttps, sessionCookie } from '@/server/auth/cook
 
 // /robots.txt 처럼 public/ 의 정적 파일도 로그인 없이 열어 둔다. public/ 에 파일을 추가하면 여기에도 추가한다
 // (아니면 비로그인 요청이 /login 으로 리디렉션된다).
-const PUBLIC_PREFIXES = ['/login', '/api/auth', '/api/health', '/robots.txt'];
+const PUBLIC_PREFIXES = ['/login', '/about', '/privacy', '/api/auth', '/api/health', '/robots.txt', '/logo.png'];
 
 function isPublic(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));

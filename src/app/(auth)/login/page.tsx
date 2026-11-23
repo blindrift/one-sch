@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -40,6 +41,10 @@ export default async function LoginPage({
             </Button>
           </form>
           {localEnabled ? <LoginForm callbackUrl={callbackUrl} /> : null}
+          <p className="flex justify-center gap-4 text-xs text-muted-foreground">
+            <Link href="/about">소개</Link>
+            <Link href="/privacy">개인정보처리방침</Link>
+          </p>
         </CardContent>
       </Card>
     </main>

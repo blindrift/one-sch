@@ -24,7 +24,7 @@ describe('middleware', () => {
   });
 
   it('공개 경로는 정확한 경로·하위 경로만(접두어 흉내는 보호)', () => {
-    for (const p of ['/login', '/login?callbackUrl=%2Fx', '/api/auth/session', '/api/health', '/robots.txt']) {
+    for (const p of ['/login', '/login?callbackUrl=%2Fx', '/about', '/privacy', '/logo.png', '/api/auth/session', '/api/health', '/robots.txt']) {
       expect(middleware(req(p)).status, p).toBe(200);
     }
     for (const p of ['/loginx', '/api/authx', '/api/healthz', '/admin/users']) {
