@@ -20,7 +20,7 @@ import { AppError } from '@/server/action-result';
 import { hashPassword, verifyPassword } from '@/server/auth/password';
 import { createSession, loadSession } from '@/server/auth/session';
 import * as users from '@/server/services/user-service';
-import { disconnectAll, resetDb } from '../helpers/db';
+import { disconnectAll, resetDb, stringifyRow } from '../helpers/db';
 
 const meta = { ip: '127.0.0.1', userAgent: 'vitest' };
 
@@ -195,7 +195,7 @@ describe('user-service', () => {
     expect(await verifyPassword(after.passwordHash!, temporaryPassword)).toBe(true);
     expect(await prisma.session.count({ where: { userId: local.id } })).toBe(0);
     const log = await prisma.auditLog.findFirstOrThrow({ where: { action: 'user.password.reset' } });
-    expect(JSON.stringify(log)).not.toContain(temporaryPassword);
+    expect(stringifyRow(log)).not.toContain(temporaryPassword);
   });
 
   it('트랜잭션: 감사 기록이 실패하면 변경도 롤백된다', async () => {
