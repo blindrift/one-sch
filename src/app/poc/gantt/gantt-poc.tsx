@@ -5,7 +5,7 @@ import { Gantt, Willow, type IApi } from '@svar-ui/react-gantt';
 import { Locale } from '@svar-ui/react-core';
 import '@svar-ui/react-gantt/all.css';
 import { computeSummaries, createsCycle, generate, type PocLink, type PocTask } from './data';
-import { ko } from './ko';
+import { ko } from '@/components/gantt/ko';
 import styles from './gantt-poc.module.css';
 
 type Zoom = 'day' | 'week' | 'month';

@@ -1,0 +1,51 @@
+/* 간트 화면 보조 스타일. SVAR 클래스(wx-*)를 대상으로 하므로 전역 CSS 다(gantt-view 에서만 import). */
+
+/* 막대 색: 템플릿이 그리는 배경(.og-bar-bg)이 진행률 채움 아래, 막대 자체 배경 위에 오도록 막대를 쌓임 맥락으로 만든다. */
+.og-gantt .wx-bar.wx-task,
+.og-gantt .wx-bar.wx-summary {
+  isolation: isolate;
+  background: transparent;
+  border: none;
+}
+.og-gantt .og-bar-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+}
+.og-gantt .wx-bar .wx-progress-percent {
+  background: rgb(0 0 0 / 28%);
+}
+.og-gantt .wx-bar.wx-summary .og-bar-bg {
+  opacity: 0.55;
+}
+.og-gantt .og-bar-text {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  padding-inline: 4px;
+  color: #fff;
+  font-size: 12px;
+  line-height: inherit;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+/* 지연(종료일 < 오늘, 완료 아님): 빨간 테두리 */
+.og-gantt .og-bar-bg.og-late {
+  outline: 2px solid var(--destructive);
+  outline-offset: -2px;
+}
+/* 마일스톤은 프로젝트 색 마름모 */
+.og-gantt .wx-bar.wx-milestone .wx-content {
+  background: var(--og-color, #6b7280);
+}
+/* 오늘 선(일 줌): highlightTime 이 오늘 열에 붙이는 클래스 */
+.og-gantt .og-today {
+  background: color-mix(in oklch, var(--destructive) 14%, transparent);
+  box-shadow: inset 2px 0 0 var(--destructive);
+}
+/* 읽기 전용 행(보관 프로젝트) */
+.og-gantt .og-bar-bg.og-readonly {
+  opacity: 0.35;
+}

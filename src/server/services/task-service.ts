@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { parseYmd, toYmd } from '@/lib/dates';
 import { depthOf, isAncestor, subtreeHeight, type ParentMap } from '@/lib/schedule/graph';
 import { summarize } from '@/lib/schedule/rollup';
+import type { TaskDeleteResult, TaskWriteResult } from '@/lib/schedule/dto';
 import { MAX_TASK_DEPTH } from '@/lib/schedule/status';
 import type { CreateTaskInput, DeleteTaskInput, UpdateTaskInput } from '@/lib/validation/task';
 import { AppError } from '../action-result';
@@ -12,13 +13,7 @@ import type { RequestMeta } from '../request-meta';
 import { conflict, ensureActiveUser, toTaskDto, validation, type Actor, type TaskDto } from './schedule-dto';
 import { lockProject, SCHEDULE_TX } from './schedule-lock';
 
-export type TaskWriteResult = {
-  task: TaskDto;
-  /** 재계산으로 값·version 이 바뀐 조상(가까운 순). 클라이언트는 이것으로 요약 막대를 갱신한다. */
-  ancestors: TaskDto[];
-};
-
-export type TaskDeleteResult = { deletedIds: string[]; ancestors: TaskDto[] };
+export type { TaskDeleteResult, TaskWriteResult };
 
 /** 감사·비교용 스냅샷(날짜는 ymd) */
 function snapshot(t: TaskDto) {

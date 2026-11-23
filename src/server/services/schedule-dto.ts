@@ -1,6 +1,7 @@
 import 'server-only';
 import type { ProjectStatus as PrismaProjectStatus, TaskStatus as PrismaTaskStatus } from '@prisma/client';
 import { toYmd } from '@/lib/dates';
+import type { ProjectDto, TaskDto } from '@/lib/schedule/dto';
 import type { ProjectStatus, TaskStatus } from '@/lib/schedule/status';
 import { AppError } from '../action-result';
 import type { Tx } from '../db';
@@ -14,41 +15,7 @@ void taskStatusMatch;
 
 export type Actor = { id: string };
 
-/** 화면·액션 결과로 내려보내는 프로젝트. 날짜는 `YYYY-MM-DD`. */
-export type ProjectDto = {
-  id: string;
-  key: string;
-  name: string;
-  color: string;
-  status: ProjectStatus;
-  startDate: string | null;
-  endDate: string | null;
-  ownerId: string;
-  archived: boolean;
-  version: number;
-};
-
-export type TaskDto = {
-  id: string;
-  projectId: string;
-  parentId: string | null;
-  title: string;
-  startDate: string;
-  endDate: string;
-  progress: number;
-  status: TaskStatus;
-  assigneeId: string | null;
-  isMilestone: boolean;
-  sortOrder: number;
-  version: number;
-  /** 하위 작업이 있는지(요약 행, D4) */
-  hasChildren: boolean;
-};
-
-export type DependencyDto = { id: string; fromTaskId: string; toTaskId: string };
-
-/** 담당자·책임자 후보(D8): 이메일은 내려보내지 않는다. */
-export type UserOption = { id: string; name: string };
+export type { DependencyDto, ProjectDto, TaskDto, UserOption } from '@/lib/schedule/dto';
 
 type ProjectRow = {
   id: string;
