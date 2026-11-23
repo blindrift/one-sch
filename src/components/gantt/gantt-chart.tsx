@@ -36,9 +36,6 @@ type SelectionBox = { left: number; top: number; width: number; height: number; 
 /** 끌기로 보는 최소 이동(px). 이보다 짧으면 단순 클릭으로 둔다 */
 const DRAG_THRESHOLD = 4;
 
-/** 높이 측정을 기다리는 최대 프레임 수(약 0.5초) */
-const MAX_ARM_FRAMES = 30;
-
 const NO_ROWS: GanttRow[] = [];
 const NO_LINKS: GanttLink[] = [];
 
@@ -135,24 +132,10 @@ export default function GanttChart({ rows, links, zoom, today, readonly, onInit,
 
   // SVAR 표(왼쪽 열)는 자기 높이를 재기 전 첫 렌더에서 모든 행을 그린다(3,000건이면 DOM 3만여 개, NAS 에서 1초 이상).
   // 그래서 빈 데이터로 먼저 띄워 크기를 재게 한 다음 프레임에 실제 행을 넘긴다(그 뒤로는 보이는 행만 그린다).
-  // 다음 프레임에 바로 넘기면, NAS 처럼 바쁜 환경에서 SVAR 가 아직 높이를 재지 못해 전부 그리는 경우가 있었다(경합).
-  // 그래서 SVAR 가 차트 높이(_chartHeight)를 잰 것을 확인한 다음 프레임에 넘긴다(못 재면 MAX_ARM_FRAMES 뒤에 넘긴다).
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     performance.mark('gantt-mounted');
-    let frames = 0;
-    let measured = false;
-    let id = 0;
-    const tick = () => {
-      frames += 1;
-      if (measured || frames >= MAX_ARM_FRAMES) {
-        setArmed(true);
-        return;
-      }
-      measured = (apiRef.current?.getState()._chartHeight ?? 0) > 0;
-      id = requestAnimationFrame(tick);
-    };
-    id = requestAnimationFrame(tick);
+    const id = requestAnimationFrame(() => setArmed(true));
     return () => cancelAnimationFrame(id);
   }, []);
 
@@ -169,8 +152,9 @@ export default function GanttChart({ rows, links, zoom, today, readonly, onInit,
     return () => cancelAnimationFrame(id);
   }, [armed]);
 
+  // 클래스 이름은 통째로 쓴다: 템플릿 문자열에 붙이면 Tailwind 가 h-full 을 못 찾아 높이가 빠지고 행 가상화가 꺼진다
   return (
-    <div ref={frame} className={`og-gantt h-full${selectable ? ' og-selectable' : ''}`} data-testid="gantt">
+    <div ref={frame} className={selectable ? 'og-gantt h-full og-selectable' : 'og-gantt h-full'} data-testid="gantt">
       <Locale words={ko}>
         {/* fonts=false: cdn.svar.dev 글꼴·아이콘 CSS 를 불러오지 않는다(CSP). 글꼴 선언을 뺀 CSS 사본은 svar.css. */}
         <Willow fonts={false}>

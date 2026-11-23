@@ -30,6 +30,8 @@ const task = (over: Partial<TaskDto> & { id: string }): TaskDto => ({
   sortOrder: 1,
   version: 0,
   hasChildren: false,
+  url: null,
+  memo: null,
   ...over,
 });
 
