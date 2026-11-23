@@ -380,6 +380,60 @@ describe('updateTask', () => {
     expect(log.after).toEqual({ status: 'DONE' });
   });
 
+  it('url·memo: 생성 시 저장·감사, 수정 시 바뀐 것만 감사, null 로 지우기', async () => {
+    const memo = '첫 줄\n\t둘째 줄';
+    const a = await add({ url: 'https://example.com/ERP-1', memo });
+    expect(a).toMatchObject({ url: 'https://example.com/ERP-1', memo });
+    expect(await row(a.id)).toMatchObject({ url: 'https://example.com/ERP-1', memo });
+    const created = await prisma.auditLog.findFirstOrThrow({ where: { action: 'task.create', entityId: a.id } });
+    expect(created.after).toMatchObject({ url: 'https://example.com/ERP-1', memo });
+
+    const plain = await add({ title: 'plain' });
+    expect(plain).toMatchObject({ url: null, memo: null });
+
+    const r = await tasks.updateTask(me, { id: a.id, version: 0, url: 'https://example.com/ERP-2' }, meta);
+    expect(r.task).toMatchObject({ url: 'https://example.com/ERP-2', memo, version: 1 });
+    const log = await prisma.auditLog.findFirstOrThrow({ where: { action: 'task.update', entityId: a.id } });
+    expect(log.before).toEqual({ url: 'https://example.com/ERP-1' });
+    expect(log.after).toEqual({ url: 'https://example.com/ERP-2' });
+
+    const cleared = await tasks.updateTask(me, { id: a.id, version: 1, url: null, memo: null }, meta);
+    expect(cleared.task).toMatchObject({ url: null, memo: null, version: 2 });
+    expect(await row(a.id)).toMatchObject({ url: null, memo: null });
+    const last = await prisma.auditLog.findFirstOrThrow({ where: { action: 'task.update', entityId: a.id }, orderBy: { id: 'desc' } });
+    expect(last.before).toEqual({ url: 'https://example.com/ERP-2', memo });
+    expect(last.after).toEqual({ url: null, memo: null });
+
+    // 같은 값(이미 null)이면 감사·version 불변
+    const same = await tasks.updateTask(me, { id: a.id, version: 2, url: null, memo: null }, meta);
+    expect(same.task.version).toBe(2);
+    expect(await prisma.auditLog.count({ where: { action: 'task.update', entityId: a.id } })).toBe(2);
+  });
+
+  it('url·memo 만 바꾸면 조상은 건드리지 않는다 — 값·version 불변', async () => {
+    const { g, p, c, pv, gv } = await staleParentFixture();
+    const pBefore = await row(p.id);
+    const r = await tasks.updateTask(
+      me,
+      { id: c.id, version: (await row(c.id)).version, url: 'https://example.com/x', memo: '메모' },
+      meta,
+    );
+    expect(r.task).toMatchObject({ url: 'https://example.com/x', memo: '메모' });
+    expect(r.ancestors).toEqual([]);
+    expect(await row(p.id)).toEqual(pBefore);
+    expect((await row(p.id)).version).toBe(pv);
+    expect((await row(g.id)).version).toBe(gv);
+  });
+
+  it('DB CHECK: 빈 문자열·한도 초과 url·memo 는 DB 에서도 거부', async () => {
+    const a = await add();
+    await expect(prisma.task.update({ where: { id: a.id }, data: { url: '' } })).rejects.toThrow();
+    await expect(prisma.task.update({ where: { id: a.id }, data: { url: 'x'.repeat(2001) } })).rejects.toThrow();
+    await expect(prisma.task.update({ where: { id: a.id }, data: { memo: '' } })).rejects.toThrow();
+    await expect(prisma.task.update({ where: { id: a.id }, data: { memo: 'x'.repeat(5001) } })).rejects.toThrow();
+    await prisma.task.update({ where: { id: a.id }, data: { url: 'x'.repeat(2000), memo: 'x'.repeat(5000) } });
+  });
+
   it('DB 세션 시간대가 Asia/Seoul 이어도 2026-11-23 은 그대로 2026-11-23', async () => {
     await ownerDb.$executeRaw`ALTER DATABASE "onesch_test" SET timezone TO 'Asia/Seoul'`;
     try {

@@ -155,6 +155,10 @@ model Task {
   isMilestone Boolean    @default(false)
   sortOrder   Int        @default(0)
   version     Int        @default(0)
+  /// 관련 링크 하나(http/https, 2000자 이하 — 0003 의 CHECK)
+  url         String?
+  /// 여러 줄 평문 메모(5000자 이하 — 0003 의 CHECK)
+  memo        String?
   createdAt   DateTime   @default(now()) @db.Timestamptz(6)
   updatedAt   DateTime   @updatedAt @db.Timestamptz(6)
 

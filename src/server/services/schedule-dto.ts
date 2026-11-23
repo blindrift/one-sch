@@ -58,6 +58,8 @@ export type TaskRow = {
   isMilestone: boolean;
   sortOrder: number;
   version: number;
+  url: string | null;
+  memo: string | null;
 };
 
 export function toTaskDto(t: TaskRow, hasChildren: boolean): TaskDto {
@@ -74,6 +76,9 @@ export function toTaskDto(t: TaskRow, hasChildren: boolean): TaskDto {
     isMilestone: t.isMilestone,
     sortOrder: t.sortOrder,
     version: t.version,
+    // 3,000건 전송량: 빈 값은 null 로만 보낸다(DB 는 빈 문자열을 허용하지 않지만 방어적으로).
+    url: t.url || null,
+    memo: t.memo || null,
     hasChildren,
   };
 }

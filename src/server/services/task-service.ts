@@ -27,6 +27,8 @@ function snapshot(t: TaskDto) {
     status: t.status,
     assigneeId: t.assigneeId,
     isMilestone: t.isMilestone,
+    url: t.url,
+    memo: t.memo,
   };
 }
 type Snapshot = ReturnType<typeof snapshot>;
@@ -167,6 +169,8 @@ export async function createTask(actor: Actor, input: CreateTaskInput, meta: Req
         status: input.status,
         assigneeId: input.assigneeId ?? null,
         isMilestone: input.isMilestone,
+        url: input.url ?? null,
+        memo: input.memo ?? null,
         sortOrder: (_max.sortOrder ?? 0) + 1,
       },
     });
@@ -196,7 +200,7 @@ export async function updateTask(actor: Actor, input: UpdateTaskInput, meta: Req
     const before = toTaskDto(row, summary);
 
     const patch: Partial<Snapshot> = {};
-    for (const k of ['title', 'startDate', 'endDate', 'progress', 'status', 'assigneeId', 'isMilestone', 'parentId'] as const) {
+    for (const k of ['title', 'startDate', 'endDate', 'progress', 'status', 'assigneeId', 'isMilestone', 'parentId', 'url', 'memo'] as const) {
       if (input[k] !== undefined) (patch as Record<string, unknown>)[k] = input[k];
     }
     const diff = diffFields(snapshot(before), patch);
@@ -230,6 +234,8 @@ export async function updateTask(actor: Actor, input: UpdateTaskInput, meta: Req
     if (changed('assigneeId')) data.assigneeId = patch.assigneeId ?? null;
     if (changed('isMilestone')) data.isMilestone = patch.isMilestone;
     if (changed('parentId')) data.parentId = patch.parentId ?? null;
+    if (changed('url')) data.url = patch.url ?? null;
+    if (changed('memo')) data.memo = patch.memo ?? null;
     const { count } = await tx.task.updateMany({ where: { id: row.id, version: row.version }, data });
     if (count !== 1) throw conflict('version');
 
