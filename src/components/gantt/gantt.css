@@ -36,9 +36,30 @@
   outline: 2px solid var(--destructive);
   outline-offset: -2px;
 }
-/* 마일스톤은 프로젝트 색 마름모 */
+/* 마일스톤은 프로젝트 색 마름모(템플릿이 그린다). SVAR 기본 마름모는 감춘다. */
 .og-gantt .wx-bar.wx-milestone .wx-content {
-  background: var(--og-color, #6b7280);
+  background: transparent;
+}
+.og-gantt .og-milestone {
+  position: absolute;
+  inset: 0;
+  transform: rotate(45deg) scale(0.7);
+  border-radius: 2px;
+}
+.og-gantt .og-milestone.og-late {
+  outline: 2px solid var(--destructive);
+}
+.og-gantt .og-milestone-text {
+  position: absolute;
+  left: 100%;
+  padding-left: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* 기간이 없는 프로젝트 행: 막대 없음(D16) */
+.og-gantt .wx-bar:has(> .og-unscheduled) {
+  display: none;
 }
 /* 오늘 선(일 줌): highlightTime 이 오늘 열에 붙이는 클래스 */
 .og-gantt .og-today {

@@ -1,12 +1,26 @@
+import { isZoom } from '@/components/gantt/scales';
+import { hasRole } from '@/lib/roles';
 import { requirePage } from '@/server/auth/require-role';
+import { loadTimeline } from '@/server/services/timeline-service';
+import { parseTimelineQuery, type TimelineSearchParams } from './query';
+import { TimelineView } from './timeline-view';
 
-export default async function TimelinePage() {
-  await requirePage('VIEWER');
+export default async function TimelinePage({ searchParams }: { searchParams: Promise<TimelineSearchParams> }) {
+  const me = await requirePage('VIEWER');
+  const sp = await searchParams;
+  const includeArchived = sp.archived === '1';
+  const data = await loadTimeline({ includeArchived });
 
   return (
-    <main className="p-6">
-      <h1 className="text-xl font-semibold">전체 타임라인</h1>
-      <p className="mt-2 text-sm text-muted-foreground">2단계에서 프로젝트 간트가 들어갈 자리입니다.</p>
+    <main>
+      <h1 className="sr-only">전체 타임라인</h1>
+      <TimelineView
+        data={data}
+        canEdit={hasRole(me.role, 'MEMBER')}
+        initialFilter={parseTimelineQuery(sp)}
+        initialZoom={isZoom(sp.zoom) ? sp.zoom : 'day'}
+        scope={{ kind: 'all', includeArchived }}
+      />
     </main>
   );
 }
