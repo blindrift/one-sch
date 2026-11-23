@@ -56,6 +56,21 @@ export default function GanttChart({ rows, links, zoom, today, readonly, onInit,
   const [box, setBox] = useState<SelectionBox | null>(null);
   const selectable = !readonly && !!onRangeSelect;
 
+  // 진행률 칸은 한 번 눌러 바로 고친다. SVAR 표는 더블클릭에만 편집기를 열므로, 칸 클릭을 더블클릭으로 넘긴다.
+  // (고칠 수 없는 행은 columns.ts 의 editor 가 null 이라 열리지 않는다)
+  useEffect(() => {
+    const root = frame.current;
+    if (!root || readonly) return;
+    const onClick = (e: MouseEvent) => {
+      if (e.detail > 1) return; // 진짜 더블클릭의 두 번째 클릭은 그대로 둔다
+      const cell = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-col-id=":progress"]') : null;
+      if (!cell || !root.contains(cell) || cell.querySelector('input')) return;
+      cell.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY }));
+    };
+    root.addEventListener('click', onClick);
+    return () => root.removeEventListener('click', onClick);
+  }, [readonly]);
+
   // 빈 곳 끌기 → 날짜 범위. SVAR 는 빈 곳 mousedown 에 하는 일이 없다(막대·링크 점·삭제 단추는 건드리지 않는다).
   useEffect(() => {
     const root = frame.current;

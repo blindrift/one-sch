@@ -144,6 +144,44 @@ test('빈 곳을 끌어 작업 추가: 끈 날짜·행(형제/하위)으로 대�
   expect(await ownerDb.task.count({ where: { projectId: p.id } })).toBe(5);
 });
 
+test('진행률 칸을 눌러 바로 고친다 → 저장·상위 재계산, 요약 행은 고칠 수 없다', async ({ page, context }) => {
+  const m = await createUser('MEMBER');
+  const p = await createProject(m.id, { key: 'PRG' });
+  const parent = await createTask(p.id, { title: '상위작업', start: '2026-11-10', end: '2026-11-13' });
+  const a = await createTask(p.id, { title: '하위가', start: '2026-11-10', end: '2026-11-11', parentId: parent.id });
+  await createTask(p.id, { title: '하위나', start: '2026-11-12', end: '2026-11-13', parentId: parent.id });
+  await injectSession(context, m.id);
+  await gotoTimeline(page, '/projects/PRG');
+  const row = (title: string) => page.locator('.wx-row', { hasText: title });
+  const cell = (title: string) => row(title).locator('[data-col-id=":progress"]');
+  // 편집 중에는 SVAR 가 칸을 편집기(.wx-editor)로 바꾼다
+  const editor = (title: string) => row(title).locator('.wx-editor input');
+
+  // 한 번 누르면 입력칸이 열린다 → 80 입력 후 Enter
+  await cell('하위가').click();
+  const input = editor('하위가');
+  await expect(input).toBeVisible();
+  await input.fill('80');
+  await input.press('Enter');
+  await expect.poll(async () => (await ownerDb.task.findUniqueOrThrow({ where: { id: a.id } })).progress).toBe(80);
+  await expect(cell('하위가')).toHaveText('80%');
+  // 상위는 하위 기간 가중 평균으로 다시 계산된다(2일×80 + 2일×0)/4 = 40 (D4)
+  await expect.poll(async () => (await ownerDb.task.findUniqueOrThrow({ where: { id: parent.id } })).progress).toBe(40);
+  await expect(cell('상위작업')).toHaveText('40%');
+
+  // 범위 밖 값은 0–100 으로 자른다
+  await cell('하위가').click();
+  await editor('하위가').fill('150');
+  await editor('하위가').press('Enter');
+  await expect.poll(async () => (await ownerDb.task.findUniqueOrThrow({ where: { id: a.id } })).progress).toBe(100);
+
+  // 요약 행은 입력칸이 열리지 않는다
+  await cell('상위작업').click();
+  await page.waitForTimeout(300);
+  await expect(row('상위작업').locator('.wx-editor')).toHaveCount(0);
+  expect((await auditActions()).filter((x) => x === 'task.update')).toHaveLength(2);
+});
+
 test('막대를 +3일 끌고 오른쪽 끝을 +2일 늘린 뒤 새로고침 → DB·화면 유지, 감사 task.update', async ({ page, context }) => {
   const m = await createUser('MEMBER');
   const p = await createProject(m.id, { key: 'DRG' });

@@ -172,8 +172,9 @@ export function dragPatch(
     const e = ymdFromSvarEnd(after.end);
     if (e !== before.endDate) patch.endDate = e;
   }
-  if (after.progress !== undefined && after.progress !== null) {
-    const pr = Math.min(100, Math.max(0, Math.round(after.progress)));
+  // 표에서 고친 값은 문자열·빈 값일 수 있다: 숫자가 아니면 진행률은 바꾸지 않는다
+  if (after.progress !== undefined && after.progress !== null && Number.isFinite(Number(after.progress)) && String(after.progress).trim() !== '') {
+    const pr = Math.min(100, Math.max(0, Math.round(Number(after.progress))));
     if (pr !== before.progress) patch.progress = pr;
   }
   return patch;
