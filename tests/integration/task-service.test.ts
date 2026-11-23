@@ -489,6 +489,8 @@ describe('deleteTask', () => {
         status: 'TODO',
         assigneeId: null,
         isMilestone: false,
+        url: null,
+        memo: null,
       },
     ]);
   });
