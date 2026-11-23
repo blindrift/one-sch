@@ -1,5 +1,5 @@
 import type { Page, Request } from '@playwright/test';
-import { bar, createProject, createTask, createUser, DAY_CELL, dragBar, expect, formError, gotoReady, gotoTimeline, injectSession, ownerDb, resetAndSeed, test, ymdOf } from './fixtures';
+import { bar, createProject, createTask, createUser, DAY_CELL, dragBar, dragEmpty, expect, formError, gotoReady, gotoTimeline, injectSession, ownerDb, resetAndSeed, test, ymdOf } from './fixtures';
 
 test.beforeEach(resetAndSeed);
 
@@ -40,7 +40,11 @@ test('VIEWER: 타임라인·프로젝트 화면은 보이고 추가·수정 단�
   const actions = watchActions(page);
   await dragBar(page, bar(page, t.id), 3 * DAY_CELL, 'move');
   await bar(page, t.id).dblclick();
+  // 빈 곳 끌기도 대화상자를 열지 않는다
+  const vb = (await bar(page, t.id).boundingBox())!;
+  await dragEmpty(page, vb.y + vb.height / 2, vb.x + vb.width + 3 * DAY_CELL, vb.x + vb.width + 6 * DAY_CELL);
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByTestId('gantt-range')).toHaveCount(0);
   await actions.settle();
   expect(actions.count()).toBe(0);
   expect(await datesOf(t.id)).toBe('2026-11-10~2026-11-14:0');

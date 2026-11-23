@@ -10,6 +10,7 @@ import {
   DAY_CELL,
   day,
   dragBar,
+  dragEmpty,
   expect,
   formError,
   gotoTimeline,
@@ -82,6 +83,59 @@ test('작업·하위 작업·마일스톤을 대화상자로 만든다 → YYYY-
   await page.locator('[data-testid="gantt"][data-ready="true"]').waitFor();
   await expect(page.getByTestId('gantt').getByText('2026-11-14 ~ 2026-11-20')).toHaveCount(2);
   expect(await auditActions()).toEqual(expect.arrayContaining(['task.create']));
+});
+
+test('빈 곳을 끌어 작업 추가: 끈 날짜·행(형제/하위)으로 대화상자가 채워지고 저장된다, Esc 는 취소', async ({ page, context }) => {
+  const m = await createUser('MEMBER');
+  const p = await createProject(m.id, { key: 'DRC', name: '끌어 만들기' });
+  const top = await createTask(p.id, { title: '기준', start: '2026-11-10', end: '2026-11-12' });
+  const parent = await createTask(p.id, { title: '상위', start: '2026-11-10', end: '2026-11-12' });
+  await createTask(p.id, { title: '하위', start: '2026-11-10', end: '2026-11-12', parentId: parent.id });
+  await injectSession(context, m.id);
+  await gotoTimeline(page, '/projects/DRC');
+  const dlg = page.getByRole('dialog');
+  const box = (await bar(page, top.id).boundingBox())!; // 11-10 칸의 왼쪽
+  const xOf = (dayFrom10: number) => box.x + dayFrom10 * DAY_CELL + DAY_CELL / 2;
+  const yTop = box.y + box.height / 2;
+
+  // 일반 작업(최상위) 행의 빈 곳 11-20 → 11-24: 형제(최상위)로
+  await dragEmpty(page, yTop, xOf(10), xOf(14));
+  await expect(dlg).toBeVisible();
+  await expect(dlg.getByLabel('시작일')).toHaveValue('2026-11-20');
+  await expect(dlg.getByLabel('종료일')).toHaveValue('2026-11-24');
+  await expect(dlg.getByLabel('상위 작업')).toHaveValue('');
+  await dlg.getByLabel('제목').fill('끌어 만든 작업');
+  await dlg.getByRole('button', { name: '저장' }).click();
+  await expect(dlg).toBeHidden();
+  const made = await ownerDb.task.findFirstOrThrow({ where: { projectId: p.id, title: '끌어 만든 작업' } });
+  expect([made.parentId, ymdOf(made.startDate), ymdOf(made.endDate)]).toEqual([null, '2026-11-20', '2026-11-24']);
+  await expect(bar(page, made.id)).toBeVisible();
+
+  // 하위가 있는 작업 행에서 오른쪽→왼쪽으로 끌기: 그 작업의 하위로, 앞이 시작일
+  const pb = (await bar(page, parent.id).boundingBox())!;
+  await dragEmpty(page, pb.y + pb.height / 2, xOf(8), xOf(6));
+  await expect(dlg).toBeVisible();
+  await expect(dlg.getByLabel('시작일')).toHaveValue('2026-11-16');
+  await expect(dlg.getByLabel('종료일')).toHaveValue('2026-11-18');
+  await expect(dlg.getByLabel('상위 작업')).toHaveValue(parent.id);
+  await dlg.getByLabel('제목').fill('끌어 만든 하위');
+  await dlg.getByRole('button', { name: '저장' }).click();
+  await expect(dlg).toBeHidden();
+  const child = await ownerDb.task.findFirstOrThrow({ where: { projectId: p.id, title: '끌어 만든 하위' } });
+  expect(child.parentId).toBe(parent.id);
+  expect(await taskDates(parent.id)).toBe('2026-11-10~2026-11-18'); // 요약 재계산(D4)
+
+  // 끄는 중 Esc: 강조가 사라지고 대화상자도 열리지 않는다. 짧은 클릭도 열리지 않는다
+  await page.mouse.move(xOf(10), yTop);
+  await page.mouse.down();
+  await page.mouse.move(xOf(13), yTop, { steps: 4 });
+  await expect(page.getByTestId('gantt-range')).toContainText('2026-11-20 ~ 2026-11-23');
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('gantt-range')).toHaveCount(0);
+  await page.mouse.up();
+  await page.mouse.click(xOf(16), yTop);
+  await expect(dlg).toHaveCount(0);
+  expect(await ownerDb.task.count({ where: { projectId: p.id } })).toBe(5);
 });
 
 test('막대를 +3일 끌고 오른쪽 끝을 +2일 늘린 뒤 새로고침 → DB·화면 유지, 감사 task.update', async ({ page, context }) => {

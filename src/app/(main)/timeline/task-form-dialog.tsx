@@ -17,6 +17,9 @@ export const SELECT_CLASS =
 
 export type DependencyItem = { id: string; direction: 'pred' | 'succ'; title: string };
 
+/** 새 작업의 미리 채울 값(차트에서 끌어 연 경우). 프로젝트가 작업을 만들 수 없는 곳이면 무시한다 */
+export type TaskPreset = { projectId?: string; parentId?: string | null; startDate: string; endDate: string };
+
 type Failure = { code: string; message: string; fieldErrors?: Record<string, string[]> };
 
 type Props = {
@@ -32,6 +35,7 @@ type Props = {
   allDependencies?: DependencyDto[];
   users: UserOption[];
   defaultProjectId?: string;
+  preset?: TaskPreset;
   /** 편집 중인 작업의 의존(선행·후행) */
   dependencies?: DependencyItem[];
   descendantCount?: number;
@@ -75,6 +79,7 @@ function TaskForm({
   allDependencies,
   users,
   defaultProjectId,
+  preset,
   dependencies = [],
   descendantCount = 0,
   today,
@@ -84,12 +89,13 @@ function TaskForm({
   onRemoveDependency,
   onStale,
 }: Props) {
-  const [projectId, setProjectId] = useState(task?.projectId ?? defaultProjectId ?? projects[0]?.id ?? '');
-  const [parentId, setParentId] = useState(task?.parentId ?? '');
+  const presetProject = preset?.projectId && projects.some((p) => p.id === preset.projectId) ? preset.projectId : undefined;
+  const [projectId, setProjectId] = useState(task?.projectId ?? presetProject ?? defaultProjectId ?? projects[0]?.id ?? '');
+  const [parentId, setParentId] = useState(task?.parentId ?? (presetProject ? preset?.parentId : null) ?? '');
   const [title, setTitle] = useState(task?.title ?? '');
   const [isMilestone, setIsMilestone] = useState(task?.isMilestone ?? false);
-  const [startDate, setStartDate] = useState(task?.startDate ?? today);
-  const [endDate, setEndDate] = useState(task?.endDate ?? today);
+  const [startDate, setStartDate] = useState(task?.startDate ?? preset?.startDate ?? today);
+  const [endDate, setEndDate] = useState(task?.endDate ?? preset?.endDate ?? today);
   const [progress, setProgress] = useState(String(task?.progress ?? 0));
   const [status, setStatus] = useState<TaskStatus>(task?.status ?? 'TODO');
   const [assigneeId, setAssigneeId] = useState(task?.assigneeId ?? '');

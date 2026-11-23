@@ -75,3 +75,33 @@
 .og-gantt .og-bar-bg.og-readonly {
   opacity: 0.35;
 }
+
+/* 빈 곳 끌기로 작업 추가: 끌 수 있는 곳은 십자 커서, 끄는 동안 고른 날짜를 강조한다 */
+.og-gantt.og-selectable .wx-area {
+  cursor: crosshair;
+}
+.og-gantt.og-selectable .wx-area .wx-bar {
+  cursor: pointer;
+}
+.og-gantt .og-range {
+  position: absolute;
+  z-index: 20;
+  pointer-events: none;
+  box-sizing: border-box;
+  border: 1px dashed #2563eb;
+  background: color-mix(in srgb, #2563eb 18%, transparent);
+  border-radius: 4px;
+  overflow: visible;
+}
+.og-gantt .og-range span {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  font-size: 11px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #2563eb;
+  color: #fff;
+}

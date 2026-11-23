@@ -8,6 +8,7 @@ import { isLate, summarize } from '@/lib/schedule/rollup';
 const PROJECT_PREFIX = 'p:';
 export const projectRowId = (projectId: string) => `${PROJECT_PREFIX}${projectId}`;
 export const isProjectRow = (id: string) => id.startsWith(PROJECT_PREFIX);
+export const projectIdOfRow = (rowId: string) => rowId.slice(PROJECT_PREFIX.length);
 
 /** SVAR 에 넘기는 행. SVAR 표준 필드 + 화면용 사용자 필드 */
 export type GanttRow = {
