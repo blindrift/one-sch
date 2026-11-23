@@ -3,6 +3,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
+import { PAGE_POLICY } from './page-policy';
 import { actionKey, PUBLIC_ACTIONS } from './policy';
 import { ROUTE_POLICY, routeKey } from './route-policy';
 
@@ -376,15 +377,77 @@ function topLevelProblems(sf: ts.SourceFile): string[] {
     if (i < prologue) return;
     if (!TOP_LEVEL_ALLOWED.has(s.kind)) problems.push(`최상위 문장 금지(${ts.SyntaxKind[s.kind]}): ${s.getText(sf).slice(0, 50)}`);
   });
-  // 함수 밖(모듈 평가 시점)의 await 금지
+  // 함수 밖(모듈 평가 시점)의 await·즉시 실행 함수(IIFE) 금지, class static 블록은 어디서든 금지
+  const line = (node: ts.Node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
   const visit = (node: ts.Node) => {
+    if (ts.isClassStaticBlockDeclaration(node)) {
+      problems.push(`class static 블록 금지: ${line(node)}행`);
+      return;
+    }
     if (ts.isFunctionLike(node)) return;
     if (ts.isAwaitExpression(node) || (ts.isForOfStatement(node) && node.awaitModifier)) {
-      problems.push(`최상위 await 금지: ${sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1}행`);
+      problems.push(`최상위 await 금지: ${line(node)}행`);
+    }
+    if ((ts.isCallExpression(node) || ts.isNewExpression(node) || ts.isTaggedTemplateExpression(node)) && isInlineFunction(calleeOf(node))) {
+      problems.push(`최상위 즉시 실행 함수(IIFE) 금지: ${line(node)}행`);
     }
     ts.forEachChild(node, visit);
   };
   ts.forEachChild(sf, visit);
+  // static 블록은 함수 안의 class 에 있어도 찾는다(위 순회는 함수 안으로 들어가지 않는다).
+  const visitStatic = (node: ts.Node) => {
+    if (ts.isClassStaticBlockDeclaration(node) && !problems.includes(`class static 블록 금지: ${line(node)}행`)) {
+      problems.push(`class static 블록 금지: ${line(node)}행`);
+    }
+    ts.forEachChild(node, visitStatic);
+  };
+  ts.forEachChild(sf, visitStatic);
+  return problems;
+}
+
+function calleeOf(node: ts.CallExpression | ts.NewExpression | ts.TaggedTemplateExpression): ts.Expression {
+  return ts.isTaggedTemplateExpression(node) ? node.tag : node.expression;
+}
+
+/** 괄호·`void`·`!` 같은 단항·쉼표 식을 벗겨 낸 뒤 함수·화살표·class 식인지(`(() => {})()`, `(0, function(){})()`, `new (class {})()`) */
+function isInlineFunction(expr: ts.Expression): boolean {
+  let e: ts.Expression = expr;
+  for (;;) {
+    if (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isNonNullExpression(e) || ts.isSatisfiesExpression(e)) e = e.expression;
+    else if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.CommaToken) e = e.right;
+    else if (ts.isPropertyAccessExpression(e) && ['call', 'apply', 'bind'].includes(e.name.text)) e = e.expression;
+    else break;
+  }
+  return ts.isFunctionExpression(e) || ts.isArrowFunction(e) || ts.isClassExpression(e);
+}
+
+/** page 첫 문장의 requirePage(역할, 옵션) 인자가 PAGE_POLICY 와 같은지 */
+function pagePolicyProblems(fn: ts.FunctionDeclaration, pageRel: string): string[] {
+  const policy = PAGE_POLICY[pageRel];
+  if (!policy) return [`정책 표(page-policy.ts)에 없음`];
+  const first = fn.body?.statements[0];
+  let expr: ts.Expression | undefined;
+  if (first && ts.isExpressionStatement(first)) expr = first.expression;
+  else if (first && ts.isVariableStatement(first)) expr = first.declarationList.declarations[0]?.initializer;
+  const call = expr && ts.isAwaitExpression(expr) && ts.isCallExpression(expr.expression) ? expr.expression : null;
+  if (!call) return ['requirePage 호출을 찾지 못함'];
+  const [role, opts, ...rest] = call.arguments;
+  const problems: string[] = [];
+  if (!role || !ts.isStringLiteral(role)) problems.push('requirePage 첫 인자는 역할 문자열 리터럴이어야 함');
+  else if (role.text !== policy.min) problems.push(`정책 표의 ${policy.min} 과 requirePage('${role.text}') 가 다름`);
+  if (rest.length) problems.push('requirePage 인자는 2개까지');
+  if (policy.allowPasswordChange) {
+    const ok =
+      !!opts &&
+      ts.isObjectLiteralExpression(opts) &&
+      opts.properties.length === 1 &&
+      ts.isPropertyAssignment(opts.properties[0]) &&
+      opts.properties[0].name.getText() === 'allowPasswordChange' &&
+      opts.properties[0].initializer.kind === ts.SyntaxKind.TrueKeyword;
+    if (!ok) problems.push('정책 표대로 { allowPasswordChange: true } 리터럴이어야 함');
+  } else if (opts) {
+    problems.push('정책 표에 없는 requirePage 옵션');
+  }
   return problems;
 }
 
@@ -472,9 +535,13 @@ describe('정적 권한 검사', () => {
         (s): s is ts.FunctionDeclaration => ts.isFunctionDeclaration(s) && hasModifier(s, ts.SyntaxKind.DefaultKeyword),
       );
       if (!fn || !isAwaitCall(fn.body?.statements[0], 'requirePage')) problems.push(`${rel(file)}: 첫 문장이 requirePage 가 아님`);
+      else problems.push(...pagePolicyProblems(fn, rel(file)).map((p) => `${rel(file)}: ${p}`));
       problems.push(...requiresFrom(sf, file, 'requirePage', REQUIRE_ROLE_MODULE).map((p) => `${rel(file)}: ${p}`));
     }
     expect(problems).toEqual([]);
+    // 정책 표에만 있고 실제 page 가 없는 항목 금지(이름만 남은 정책), 공개 page 를 표에 넣지 않는다
+    const pageRels = new Set(pages.map(rel));
+    expect(Object.keys(PAGE_POLICY).filter((k) => !pageRels.has(k) || PUBLIC_PAGES.has(k))).toEqual([]);
   });
 
   it('layout·template·not-found 등 가드 없는 특수 파일은 DB·서비스에 직접·간접으로 닿지 않는다', () => {
@@ -515,5 +582,41 @@ describe('정적 권한 검사', () => {
     expect(Object.keys(ROUTE_POLICY).filter((k) => !exported.has(k))).toEqual([]);
     // 공개 route 로 지정한 파일은 실제로 있어야 한다(이름만 남은 예외 금지)
     for (const p of PUBLIC_ROUTES) expect(routes.map(rel)).toContain(p);
+  });
+});
+
+/** 위 검사 함수들이 우회 코드를 실제로 잡는지(음성 검증) */
+describe('정적 검사 자체의 음성 검증', () => {
+  const src = (code: string) => ts.createSourceFile('x.tsx', code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+
+  it.each([
+    ['화살표 IIFE', 'const x = (() => { leak(); })();'],
+    ['function IIFE', 'const x = (function () { leak(); })();'],
+    ['쉼표 IIFE', 'const x = (0, () => leak())();'],
+    ['call IIFE', 'const x = (function () { leak(); }).call(null);'],
+    ['new class', 'const x = new (class { constructor() { leak(); } })();'],
+    ['export 안 IIFE', 'export const metadata = (() => ({ title: leak() }))();'],
+    ['class static 블록', 'class A { static { leak(); } }'],
+    ['함수 안 class static 블록', 'function f() { class B { static { leak(); } } }'],
+    ['최상위 await', 'const x = await leak();'],
+    ['표현식 문장', 'leak();'],
+  ])('%s → 문제로 잡는다', (_label, code) => {
+    expect(topLevelProblems(src(code)).length).toBeGreaterThan(0);
+  });
+
+  it('정상 page 형태는 통과', () => {
+    const ok = src(`import { requirePage } from '@/server/auth/require-role';
+export default async function Page() { await requirePage('VIEWER'); const run = () => (() => 1)(); return run(); }`);
+    expect(topLevelProblems(ok)).toEqual([]);
+  });
+
+  const pageFn = (code: string) => src(code).statements.find(ts.isFunctionDeclaration)!;
+  it('requirePage 역할·옵션이 정책 표와 다르면 잡는다', () => {
+    expect(pagePolicyProblems(pageFn(`export default async function P() { await requirePage('VIEWER'); }`), 'src/app/admin/users/page.tsx')).not.toEqual([]);
+    expect(pagePolicyProblems(pageFn(`export default async function P() { await requirePage('ADMIN', { allowPasswordChange: true }); }`), 'src/app/admin/users/page.tsx')).not.toEqual([]);
+    expect(pagePolicyProblems(pageFn(`export default async function P() { const r = 'ADMIN'; await requirePage(r); }`), 'src/app/admin/users/page.tsx')).not.toEqual([]);
+    expect(pagePolicyProblems(pageFn(`export default async function P() { await requirePage('VIEWER'); }`), 'src/app/(auth)/change-password/page.tsx')).not.toEqual([]);
+    expect(pagePolicyProblems(pageFn(`export default async function P() { await requirePage('VIEWER'); }`), 'src/app/new/page.tsx')).not.toEqual([]);
+    expect(pagePolicyProblems(pageFn(`export default async function P() { const me = await requirePage('ADMIN'); }`), 'src/app/admin/users/page.tsx')).toEqual([]);
   });
 });
