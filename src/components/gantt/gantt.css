@@ -1,70 +1,429 @@
-/* 간트 화면 보조 스타일. SVAR 클래스(wx-*)를 대상으로 하므로 전역 CSS 다(gantt-chart 에서만 import). */
+/* 간트 화면 보조 스타일. SVAR 클래스(wx-*)를 대상으로 하므로 전역 CSS 다(gantt-chart 에서만 import). 색은 globals.css 의 :root 토큰. */
 
 /* <Willow> 와 Gantt 가 만드는 테마 div(두 겹)에는 높이가 없어, 그대로 두면 간트가 내용 높이만큼 늘어나 행 가상화가 꺼진다(3,000건이면 막대를 모두 그림). */
 .og-gantt .wx-theme {
   height: 100%;
 }
 
-/* 막대 색: 템플릿이 그리는 배경(.og-bar-bg)이 진행률 채움 아래, 막대 자체 배경 위에 오도록 막대를 쌓임 맥락으로 만든다. */
+/* ---- 테마 변수(Willow 기본값 덮어쓰기) ---- */
+.og-gantt .wx-theme {
+  --wx-background: var(--surface);
+  --wx-color-font: var(--text);
+  --wx-color-primary: var(--brand);
+  /* 격자선: SVAR 가 이 값의 '#' 뒤 색으로 차트 칸 무늬를 그리므로 hex 로 둔다 */
+  --wx-gantt-border: 1px solid #eef0f3;
+  --wx-gantt-border-color: #eef0f3;
+  --wx-gantt-select-color: #f6f5ff;
+  --wx-gantt-icon-color: var(--text-subtle);
+  --wx-gantt-link-color: #b5bcc8;
+  --wx-gantt-link-color-hovered: var(--brand);
+  --wx-gantt-link-marker-color: var(--brand);
+  --wx-gantt-link-marker-background: #fff;
+  --wx-gantt-bar-border-radius: 6px;
+  --wx-gantt-milestone-border-radius: 3px;
+  --wx-gantt-progress-border-color: var(--brand);
+  --wx-gantt-holiday-background: transparent;
+  --wx-grid-body-row-border: 1px solid #f1f2f4;
+  --wx-grid-header-font-color: var(--text-subtle);
+  --wx-grid-header-text-transform: none;
+  --wx-grid-cell-padding-x: 10px;
+  --wx-timescale-font-color: var(--text-muted);
+  --wx-timescale-border: 1px solid #eef0f3;
+  --wx-table-select-background: #f6f5ff;
+  --wx-table-select-focus-background: #f0eefd;
+}
+/* 글꼴 크기: globals.css 가 `.wx-theme *` 에 넣은 값보다 우선하도록 한 단계 더 구체적으로 쓴다 */
+.og-gantt .wx-theme.wx-willow-theme * {
+  --wx-grid-header-font: 500 12px var(--font-sans);
+  --wx-grid-body-font: 400 13px var(--font-sans);
+  --wx-timescale-font: 500 11px var(--font-sans);
+}
+
+/* ---- 왼쪽 표 ---- */
+.og-gantt .wx-grid .wx-header .wx-cell {
+  color: var(--text-subtle);
+  letter-spacing: 0.01em;
+}
+.og-gantt .wx-header .wx-cell,
+.og-gantt .wx-grid .wx-row .wx-cell {
+  border-right-color: transparent;
+}
+.og-gantt .wx-grid .wx-row:hover {
+  background: var(--surface-muted);
+}
+.og-gantt .wx-grid .wx-row.wx-selected {
+  background: #f6f5ff;
+  box-shadow: inset 2px 0 0 var(--brand);
+}
+/* 기간 열: 작은 회색 고정폭 숫자 */
+.og-gantt .wx-grid [data-col-id=':range'] {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+/* 펼침 단추(▸/▾): 작게, 회색, 누르기 쉬운 상자 */
+.og-gantt .wx-grid .wx-toggle-icon,
+.og-gantt .wx-grid .wx-toggle-placeholder {
+  width: 18px;
+  min-width: 18px;
+  flex: 0 0 18px;
+  height: 18px;
+  margin: 0 4px 0 0;
+  line-height: 18px;
+  text-align: center;
+  font-size: 11px;
+  border-radius: 4px;
+}
+.og-gantt .wx-grid .wx-toggle-icon {
+  color: var(--text-subtle);
+}
+.og-gantt .wx-grid .wx-toggle-icon:hover {
+  background: #eceef1;
+  color: var(--text);
+}
+/* 글자 ▸▾ 대신 얇은 꺾쇠(테두리 두 변을 돌려 그린다) */
+.og-gantt .wx-grid .wx-toggle-icon.wxi-menu-down::before,
+.og-gantt .wx-grid .wx-toggle-icon.wxi-menu-right::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  vertical-align: middle;
+}
+.og-gantt .wx-grid .wx-toggle-icon.wxi-menu-down::before {
+  margin-top: -4px;
+  transform: rotate(45deg);
+}
+.og-gantt .wx-grid .wx-toggle-icon.wxi-menu-right::before {
+  margin-top: -2px;
+  margin-left: -2px;
+  transform: rotate(-45deg);
+}
+.og-gantt .og-cell-task {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  vertical-align: middle;
+}
+.og-gantt .og-cell-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.og-gantt .og-cell-project {
+  font-weight: 600;
+  color: var(--text);
+}
+.og-gantt .og-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.og-gantt .og-ms-icon {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 1.5px;
+  transform: rotate(45deg);
+}
+/* 상태 배지: 색 점 + 라벨 */
+.og-gantt .og-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--st) 12%, #fff);
+  color: color-mix(in srgb, var(--st) 72%, #1f2328);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.og-gantt .og-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--st);
+}
+/* 담당자: 이니셜 원형 아바타 + 이름 */
+.og-gantt .og-assignee {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  vertical-align: middle;
+}
+.og-gantt .og-avatar {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: middle;
+}
+.og-gantt .og-avatar-empty {
+  box-sizing: border-box;
+  border: 1.5px dashed #cfd4db;
+}
+.og-gantt .og-assignee-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 12.5px;
+}
+/* 진행률: 작은 진행 바 + 숫자. 편집 가능한 칸은 눌러 고친다(gantt-chart 가 클릭을 더블클릭으로 넘김) */
+.og-gantt .og-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  vertical-align: middle;
+}
+.og-gantt .og-progress-track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eceef1;
+}
+.og-gantt .og-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--brand);
+}
+.og-gantt .og-progress-done .og-progress-fill {
+  background: var(--status-done);
+}
+.og-gantt .og-progress-num {
+  flex: none;
+  min-width: 32px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.og-gantt .wx-grid [data-col-id=':progress'] .wx-editor input {
+  height: 28px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+/* 표와 차트 사이 경계: 얇은 선 */
+.og-gantt .wx-resizer {
+  width: 1px;
+  background-color: var(--line);
+}
+
+/* ---- 시간 머리글 ---- */
+.og-gantt .wx-scale .wx-cell {
+  color: var(--text-muted);
+}
+/* 일 줌의 월 머리글(윗줄)은 왼쪽 정렬 */
+.og-gantt .wx-scale .wx-row:first-child .wx-cell {
+  justify-content: flex-start;
+  padding-left: 8px;
+  color: var(--text);
+  font-weight: 600;
+}
+/* 주말: 숫자를 흐리게, 열은 옅은 배경 */
+.og-gantt .wx-scale .og-weekend {
+  color: #b6bcc6;
+  background: color-mix(in srgb, var(--weekend) 60%, #fff);
+}
+.og-gantt .wx-gantt-holidays > div {
+  position: absolute;
+  top: 0;
+  height: 100%;
+}
+.og-gantt .wx-gantt-holidays > .og-weekend {
+  background: color-mix(in srgb, var(--weekend) 70%, #fff);
+}
+/* 오늘: 머리글은 알약, 차트는 가운데 세로선 */
+.og-gantt .wx-scale .og-today span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--today);
+  color: #fff;
+  font-weight: 700;
+}
+.og-gantt .wx-gantt-holidays > .og-today {
+  background-image: linear-gradient(
+    to right,
+    transparent calc(50% - 1px),
+    var(--today) calc(50% - 1px),
+    var(--today) calc(50% + 1px),
+    transparent calc(50% + 1px)
+  );
+  opacity: 0.85;
+}
+
+/* ---- 막대 ---- */
+/* 막대 색: 템플릿이 그리는 배경(.og-bar-bg)이 진행률 채움 아래, 막대 자체 배경 위에 오도록 막대를 쌓임 맥락으로 만든다.
+ * 막대 상자(끌기 영역)는 SVAR 높이 그대로 두고, 보이는 막대는 위아래를 4px 씩 줄여 날렵하게 그린다. */
 .og-gantt .wx-bar.wx-task,
 .og-gantt .wx-bar.wx-summary {
   isolation: isolate;
   background: transparent;
   border: none;
+  box-shadow: none;
+}
+.og-gantt .wx-bar.wx-selected {
+  border: none;
+}
+.og-gantt .wx-bar:not(.wx-milestone):focus {
+  outline: none;
 }
 .og-gantt .og-bar-bg {
   position: absolute;
-  inset: 0;
+  inset: 4px 0;
   z-index: -1;
-  border-radius: inherit;
+  border-radius: 6px;
+  background: var(--bar);
+  box-shadow: 0 1px 2px rgb(16 24 40 / 10%);
+  transition: box-shadow 0.12s ease, filter 0.12s ease;
 }
+.og-gantt .wx-bar .wx-progress-wrapper {
+  top: 4px;
+  height: calc(100% - 8px);
+  border-radius: 6px;
+}
+/* 진행률 채움: 같은 색의 진한 단계 */
 .og-gantt .wx-bar .wx-progress-percent {
-  background: rgb(0 0 0 / 28%);
+  background: rgb(0 0 0 / 22%);
 }
-.og-gantt .wx-bar.wx-summary .og-bar-bg {
-  opacity: 0.55;
+.og-gantt .wx-bar:hover .og-bar-bg {
+  filter: brightness(1.04);
+  box-shadow: 0 2px 8px rgb(16 24 40 / 16%);
+}
+.og-gantt .wx-bar.wx-selected .og-bar-bg {
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 4px color-mix(in srgb, var(--brand) 55%, transparent);
 }
 .og-gantt .og-bar-text {
   position: relative;
   display: block;
   overflow: hidden;
-  padding-inline: 4px;
+  padding-inline: 10px;
   color: #fff;
   font-size: 12px;
+  font-weight: 600;
   line-height: inherit;
+  text-align: left;
   white-space: nowrap;
   text-overflow: ellipsis;
   pointer-events: none;
 }
+/* 요약 막대(하위가 있는 작업): 옅은 프로젝트 색 + 진행 채움, 글자는 진한 프로젝트 색 */
+.og-gantt .og-bar-bg.og-soft {
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bar) 22%, #fff);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bar) 35%, transparent);
+}
+.og-gantt .og-soft-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: color-mix(in srgb, var(--bar) 40%, #fff);
+}
+.og-gantt .og-bar-text-soft {
+  color: color-mix(in srgb, var(--bar) 65%, #111);
+}
+.og-gantt .wx-bar:has(.og-soft) .wx-progress-wrapper,
+.og-gantt .wx-bar:has(.og-bracket) .wx-progress-wrapper,
+.og-gantt .wx-bar:has(.og-bracket) .wx-progress-marker {
+  display: none;
+}
+/* 프로젝트 행: 얇은 괄호형(⊓) */
+.og-gantt .og-bar-bg.og-bracket {
+  inset: auto 0;
+  top: 50%;
+  height: 10px;
+  margin-top: -6px;
+  box-sizing: border-box;
+  border: 3px solid var(--bar);
+  border-bottom: none;
+  border-radius: 3px 3px 0 0;
+  background: transparent;
+  box-shadow: none;
+}
+.og-gantt .wx-bar:hover .og-bar-bg.og-bracket {
+  filter: none;
+  box-shadow: none;
+}
 /* 관련 링크·메모 표시(🔗📝): title 이 보이도록 이 부분만 포인터를 받는다 */
 .og-gantt .og-bar-marks {
-  margin-right: 2px;
+  margin-right: 4px;
   font-size: 10px;
   pointer-events: auto;
 }
 /* 지연(종료일 < 오늘, 완료 아님): 빨간 테두리 */
 .og-gantt .og-bar-bg.og-late {
   outline: 2px solid var(--destructive);
-  outline-offset: -2px;
+  outline-offset: 0;
+}
+/* 진행률 끌기 손잡이 */
+.og-gantt .wx-bar .wx-progress-marker {
+  background: var(--brand);
+  color: #fff;
 }
 /* 마일스톤은 프로젝트 색 마름모(템플릿이 그린다). SVAR 기본 마름모는 감춘다. */
+.og-gantt .wx-bar.wx-milestone {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
 .og-gantt .wx-bar.wx-milestone .wx-content {
   background: transparent;
 }
 .og-gantt .og-milestone {
   position: absolute;
   inset: 0;
-  transform: rotate(45deg) scale(0.7);
-  border-radius: 2px;
+  transform: rotate(45deg) scale(0.56);
+  border-radius: 4px;
+  background: var(--bar);
+  box-shadow:
+    0 0 0 2px #fff,
+    0 1px 4px rgb(16 24 40 / 25%);
+}
+.og-gantt .wx-bar.wx-selected .og-milestone {
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 4px color-mix(in srgb, var(--brand) 55%, transparent);
 }
 .og-gantt .og-milestone.og-late {
   outline: 2px solid var(--destructive);
+  outline-offset: 2px;
 }
 .og-gantt .og-milestone-text {
   position: absolute;
   left: 100%;
-  padding-left: 4px;
+  padding-left: 2px;
+  color: var(--text);
   font-size: 12px;
+  font-weight: 500;
   white-space: nowrap;
   pointer-events: none;
 }
@@ -72,20 +431,20 @@
 .og-gantt .wx-bar:has(> .og-unscheduled) {
   display: none;
 }
-/* 오늘 선(일 줌): highlightTime 이 오늘 열에 붙이는 클래스 */
-.og-gantt .og-today {
-  background: color-mix(in oklch, var(--destructive) 14%, transparent);
-  box-shadow: inset 2px 0 0 var(--destructive);
-}
 /* 읽기 전용 행(보관 프로젝트) */
 .og-gantt .og-bar-bg.og-readonly {
   opacity: 0.35;
+}
+/* 의존 선: 얇은 회색, 끝 화살표는 SVAR 기본 */
+.og-gantt .wx-links .wx-line-draw {
+  stroke-width: 1.5;
 }
 
 /* 빈 곳 끌기로 작업 추가: 끌 수 있는 곳은 십자 커서, 끄는 동안 고른 날짜를 강조한다 */
 /* 강조 상자(.og-range, absolute)의 기준. 틀 높이(h-full)는 그대로 두고 위치 기준만 만든다 */
 .og-gantt {
   position: relative;
+  background: var(--surface);
 }
 .og-gantt.og-selectable .wx-area {
   cursor: crosshair;
@@ -98,20 +457,22 @@
   z-index: 20;
   pointer-events: none;
   box-sizing: border-box;
-  border: 1px dashed #2563eb;
-  background: color-mix(in srgb, #2563eb 18%, transparent);
-  border-radius: 4px;
+  border: 1.5px dashed var(--brand);
+  background: color-mix(in srgb, var(--brand) 14%, transparent);
+  border-radius: 6px;
   overflow: visible;
 }
 .og-gantt .og-range span {
   position: absolute;
   bottom: 100%;
   left: 0;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
   white-space: nowrap;
   font-size: 11px;
-  padding: 0 4px;
-  border-radius: 3px;
-  background: #2563eb;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--brand);
   color: #fff;
+  box-shadow: var(--shadow-sm);
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import type { CSSProperties } from 'react';
 import type { GanttRow } from './adapter';
 
 /**
@@ -27,7 +28,7 @@ export function TaskBar({ data }: { data: Partial<GanttRow> }) {
   if (data.type === 'milestone') {
     return (
       <>
-        <span className={`og-milestone${data.late ? ' og-late' : ''}`} style={{ background: data.color }} data-bar-id={data.id} data-late={data.late ? 'true' : undefined} />
+        <span className={`og-milestone${data.late ? ' og-late' : ''}`} style={{ '--bar': data.color } as CSSProperties} data-bar-id={data.id} data-late={data.late ? 'true' : undefined} />
         <span className="og-milestone-text">
           <Marks data={data} />
           {data.text}
@@ -35,14 +36,21 @@ export function TaskBar({ data }: { data: Partial<GanttRow> }) {
       </>
     );
   }
-  const cls = ['og-bar-bg', data.late ? 'og-late' : '', data.readonly && data.kind === 'task' ? 'og-readonly' : ''].filter(Boolean).join(' ');
+  // 막대 모양: 작업은 프로젝트 색, 하위가 있는 작업(요약)은 옅은 색 + 진행 채움, 프로젝트 행은 얇은 괄호형
+  const shape = data.kind === 'project' ? 'og-bracket' : data.type === 'summary' ? 'og-soft' : 'og-solid';
+  const cls = ['og-bar-bg', shape, data.late ? 'og-late' : '', data.readonly && data.kind === 'task' ? 'og-readonly' : ''].filter(Boolean).join(' ');
+  const color = { '--bar': data.color } as CSSProperties;
   return (
     <>
-      <span className={cls} style={{ background: data.color }} data-bar-id={data.id} data-late={data.late ? 'true' : undefined} />
-      <span className="og-bar-text">
-        <Marks data={data} />
-        {data.text}
+      <span className={cls} style={color} data-bar-id={data.id} data-late={data.late ? 'true' : undefined}>
+        {shape === 'og-soft' ? <span className="og-soft-fill" style={{ width: `${data.progress ?? 0}%` }} /> : null}
       </span>
+      {shape === 'og-bracket' ? null : (
+        <span className={shape === 'og-soft' ? 'og-bar-text og-bar-text-soft' : 'og-bar-text'} style={color}>
+          <Marks data={data} />
+          {data.text}
+        </span>
+      )}
     </>
   );
 }
