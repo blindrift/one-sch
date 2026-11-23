@@ -27,7 +27,7 @@
 | 구분 | 포함 (MVP) | 제외 (이후 검토) |
 |---|---|---|
 | 일정 | 멀티 프로젝트 간트, 작업 계층(상위/하위), 마일스톤, 의존 관계(FS), 드래그 편집, 일/주/월 줌 | 자원 부하(Workload), 기준선(Baseline) 비교, 자동 일정 재계산 |
-| 이슈 | 이슈 등록·상태·우선순위·심각도·담당자·마감일·댓글 | 첨부 파일, 이메일/메신저 알림 |
+| 이슈 | 이슈 등록·상태·우선순위·담당자·마감일·댓글 | 첨부 파일, 이메일/메신저 알림 |
 | 보기 | 간트, 칸반 보드, 목록(표), 대시보드 | 캘린더 뷰, 화이트보드, 문서 |
 | 관리 | 사용자·역할 관리, 감사 로그 | 프로젝트별 세부 권한, 외부 API·웹훅 |
 | 인증 | 구글 SSO(허용 목록), 로컬 admin 계정 | 2단계 인증(TOTP), 다른 IdP |
@@ -212,6 +212,14 @@ erDiagram
 | startDate, endDate | date | |
 | ownerId | uuid FK User | |
 | archived | bool | 보관 시 기본 화면에서 숨김 |
+| version | int | 낙관적 잠금(2단계 0002 마이그레이션에서 추가) |
+
+- 프로젝트는 실제로 지우지 않고 보관/보관 해제만 한다(D1). 7.4 의 "삭제"는 프로젝트에 대해서는 보관을 뜻한다.
+- 키는 생성 후 바꾸지 않는다(D3, URL·이슈 번호 안정성).
+- 보관된 프로젝트의 작업·의존은 읽기 전용이다(쓰기 요청은 CONFLICT `archived`, D6).
+  - 예외: 활성 프로젝트의 작업을 삭제하면 그 작업에 걸린 의존은 상대가 보관 프로젝트의 작업이어도 함께 지운다(DB cascade, 감사 `task.delete` before.dependencies 에 남음). 보관 프로젝트 때문에 활성 작업 삭제를 막지 않기 위해서다.
+  - 상위 작업을 바꿀 때도 옮기는 작업·후손과 새 상위·조상 사이에 의존이 있으면 거부한다(VALIDATION `hierarchy`, D14 와 같은 규칙).
+- 책임자(owner)·담당자(assignee) 후보는 활성 사용자 전원이다(역할 무관). 화면에는 id·이름만 내려보낸다(D8).
 
 **Task**
 | 컬럼 | 타입 | 설명 |
@@ -228,7 +236,13 @@ erDiagram
 | sortOrder | int | 간트·목록 정렬 |
 | version | int | 낙관적 잠금 (동시 편집 충돌 감지) |
 
-**TaskDependency**: `(fromTaskId, toTaskId)` unique, `type` = FS. 같은 프로젝트 또는 프로젝트 간 허용, 추가 시 순환 검사.
+- 상위 작업은 같은 프로젝트 안에서만 바꿀 수 있고, 자기 후손 밑으로는 갈 수 없다. 계층 깊이는 최대 5, 마일스톤은 상위가 될 수 없다(D13).
+- 하위 작업이 있는 상위 작업의 기간·진행률은 하위에서 자동으로 다시 계산해 같은 트랜잭션에서 DB 에 저장한다. 하위가 있는 동안에는 상위의 기간·진행률을 직접 편집·드래그할 수 없다(D4). 재계산된 조상의 `version` 도 올라간다.
+- 하위가 있는 작업을 지우면 확인 대화상자를 거쳐 하위·의존까지 연쇄 삭제하고, 감사 로그에 지운 하위·의존 목록을 남긴다(D7).
+- 상태와 진행률은 서로 연동하지 않는다(D11).
+- 같은 프로젝트의 작업 쓰기는 프로젝트 단위 advisory xact lock 으로 줄 세운다(상위 재계산·부모 순환 검사의 경쟁 방지).
+
+**TaskDependency**: `(fromTaskId, toTaskId)` unique, `type` = FS. 같은 프로젝트 또는 프로젝트 간 허용, 추가 시 순환 검사(전역 advisory lock 안에서 다시 검사). 조상·후손 사이의 의존은 거부한다(D14). FS 는 화살표로 표시만 하고 일정을 강제·자동 조정하지 않는다(D5).
 
 **Issue**
 | 컬럼 | 타입 | 설명 |
@@ -283,7 +297,14 @@ erDiagram
 - 막대 색은 프로젝트 색, 진행률은 막대 내부 채움, 지연(종료일 경과 + 미완료)은 빨간 테두리.
 - 프로젝트 행은 하위 작업의 최소 시작~최대 종료를 요약 막대로 표시.
 - 드래그 결과는 Server Action 으로 즉시 저장하고 실패 시 원위치로 되돌린 뒤 사유를 표시한다. 동시 편집 충돌(`version` 불일치)은 최신 값을 다시 불러온다.
-- 진행률 계산: 하위 작업이 있으면 기간 가중 평균, 없으면 입력값.
+- 진행률 계산: 하위 작업이 있으면 기간 가중 평균(마일스톤은 가중치 1일), 없으면 입력값.
+- 지연 판정은 6.2 와 같다: `endDate < 오늘(Asia/Seoul) AND status != DONE`. 요약 행(하위가 있는 작업·프로젝트 행)은 지연 판정에서 뺀다(D11). "오늘"은 서버가 Asia/Seoul 로 계산해 내려준다.
+- 작업이 없는 프로젝트는 프로젝트 기간이 있으면 그 기간으로 요약 막대를 그리고, 없으면 막대 없이 행만 둔다(D16).
+- 보관된 프로젝트는 기본으로 숨기고, "보관 포함" 토글을 켜면 읽기 전용으로 보인다(D6).
+- 필터(프로젝트·담당자·상태)와 줌은 URL query 에 보관한다. VIEWER 에게는 읽기 전용으로 보인다.
+- 작업 추가·수정은 대화상자로 한다(행 더블클릭 → 수정). 행 순서 드래그와 간트 라이브러리 내장 편집기는 쓰지 않는다(D10). 새 작업의 `sortOrder` 는 프로젝트 안 `max+1`.
+- 날짜는 서버·DTO 모두 `YYYY-MM-DD` 문자열(포함 종료일)이고, 간트 라이브러리(배타 종료일, 로컬 자정)와의 변환은 한 모듈(`src/components/gantt/adapter.ts`)에서만 한다.
+- `/projects/[key]` 는 2단계에서 간트 탭만 둔다(타임라인 컴포넌트를 그 프로젝트로 필터, D9). 보드·목록·이슈 탭은 3단계.
 
 ### 6.2 대시보드 정의
 - 지연 작업: `endDate < 오늘 AND status != DONE`
@@ -340,7 +361,7 @@ sequenceDiagram
 
 ### 7.2 기본 admin 계정
 - 시드 스크립트가 **User 테이블이 비어 있을 때만** `admin` 계정(비밀번호 admin)을 만든다. 이미 사용자가 있으면 만들지 않는다.
-- `mustChangePassword=true` 이므로 middleware 가 `/change-password`·로그아웃 외 모든 경로를 막는다.
+- `mustChangePassword=true` 이므로 각 page·Server Action 첫 문장의 `requirePage`/`requireRole` 이 `/change-password`·비밀번호 변경·로그아웃 외 모든 요청을 막는다(middleware 는 DB 를 보지 않는다).
 - 새 비밀번호 정책: 12자 이상, 아이디·`admin` 포함 금지, 이전 비밀번호와 다름.
 - 구글 계정 admin 을 등록한 뒤 `LOCAL_LOGIN_ENABLED=false` 로 로컬 로그인을 끄는 것을 운영 권장으로 둔다.
 
@@ -462,7 +483,6 @@ export async function updateTask(input: unknown): Promise<ActionResult<TaskDto>>
 | `LOCAL_LOGIN_ENABLED` | `true`/`false`. `false` 면 로컬 전용 계정(admin)의 남은 세션도 즉시 무효 |
 | `CLIENT_IP_HEADER` | (선택) 클라이언트 IP 헤더 이름, 기본 `x-real-ip`. 프록시가 덮어쓰는 헤더만 지정 |
 | `APP_DB_PASSWORD`, `MIGRATOR_DB_PASSWORD`, `BACKUP_DB_PASSWORD` | DB 역할별 비밀번호(`openssl rand -hex 24`) |
-| `ENABLE_POC` | (선택) 간트 PoC 화면, 기본 `false` |
 | `TZ` | `Asia/Seoul` |
 
 저장소에는 값 없는 `.env.example` 만 둔다.

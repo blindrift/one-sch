@@ -4,7 +4,7 @@
 |---|---|
 | 대상 | `@svar-ui/react-gantt` 2.8.3 (MIT), `@svar-ui/react-core` 2.6.2 |
 | 일시 | 2026-11-20 |
-| 화면 | `/poc/gantt?n=<작업 수>` — ADMIN 이고 `ENABLE_POC=true` 일 때만 (운영 기본 false) |
+| 화면 | `/poc/gantt?n=<작업 수>` — ADMIN 이고 `ENABLE_POC=true` 일 때만 (운영 기본 false). **2단계에서 삭제**(아래 "2단계 처리") |
 | 측정 | `next build` + `next start`, Playwright Chromium(헤드리스, 1600×1000), 개발 PC(macOS arm64) |
 
 ## 결론
@@ -23,7 +23,7 @@
 | 5 | 일·주·월 줌 | 동작 | `scales`·`cellWidth` 를 바꿔 전환. 머리글 `2026년 11월` / `11/15~` / `2026년`·`11월` |
 | 6 | 오늘 선 | MIT 에 vertical marker 없음(PRO) → **`highlightTime` 대안 확인** | 오늘 날짜 열에 클래스 부여(배경 + 왼쪽 2px 선). 일 단위 줌에서만 표시 |
 | 7 | 프로젝트 색·지연 테두리 | 동작(모양은 다듬기 필요) | `taskTemplate` 로 색·빨간 테두리(종료일 경과 + 진행률<100) 표시, 300건 중 15개 지연. 템플릿 내용이 진행률 채움 뒤에 놓여 글자가 잘림 → 2단계는 CSS(막대 배경)로 색을 주고 템플릿은 글자만 |
-| 8 | 한국어 | 동작(로케일 직접 작성) | 공식 로케일은 en·cn 뿐. `<Locale words={ko}>` 가 기본 위에 덮어쓰므로 쓰는 키만 정의(`src/app/poc/gantt/ko.ts`) |
+| 8 | 한국어 | 동작(로케일 직접 작성) | 공식 로케일은 en·cn 뿐. `<Locale words={ko}>` 가 기본 위에 덮어쓰므로 쓰는 키만 정의(`src/components/gantt/ko.ts` 로 옮김) |
 | 9 | `lengthUnit:'day'`·inclusiveEnd 와 `@db.Date` | **변환 필요** | SVAR 내부 `end` 는 배타적(다음 날 0시)이다. 시작=종료=11/20 을 넣으면 duration 0, 11/20~11/22 는 duration 2. `inclusiveEnd` 는 표시용일 뿐 → DB(포함 종료일) → SVAR 는 `end + 1일`, 저장 시 `end - 1일`. 마일스톤은 `type:'milestone'` 으로 따로 |
 | 10 | CSP 위반 | 스크립트 위반 0. **글꼴 요청 12건 차단(기능 영향 없음)** | 번들에 `eval`/`new Function` 없음. `<Willow fonts={false}>` 로 CDN 아이콘 CSS 요청은 없앰. 남은 것은 `react-core` CSS 의 `@font-face`(cdn.svar.dev) — CSS 를 불러오는 순간 요청되어 CSP 가 막는다(글꼴은 쓰지 않으므로 화면 영향 없음, 콘솔 오류만) |
 | 11 | `ssr:false` 하이드레이션 경고 | 없음 | `next dev` 에서 콘솔 error/warning 0(위 글꼴 CSP 메시지 제외) |
@@ -40,9 +40,14 @@
 7. **오늘 선**: `highlightTime` 은 일 단위 줌에서만 의미가 있다. 주·월 줌에서도 필요하면 차트 영역에 절대 위치 오버레이를 덧그린다.
 8. PoC 의 `window.__ganttApi` 노출은 PoC 화면 전용이며 2단계 코드로 옮기지 않는다.
 
-## 재현
+## 2단계 처리
+
+위 "2단계 반영 사항" 1–8 을 모두 반영해 `/timeline`·`/projects/[key]` 간트(`src/components/gantt/*`, `src/app/(main)/timeline/*`)로 옮기고, PoC 화면(`src/app/poc/**`)과 `ENABLE_POC` 설정(docker-compose, Playwright, 설계서 10.1)은 지웠다(결정 D12). 3,000건 첫 표시는 E2E(`tests/e2e/timeline.spec.ts`)에서 다시 잰다(`docs/phase2-report.md`).
+
+## 재현(1단계 당시, 지금은 화면이 없다)
 
 ```sh
+git checkout a559210   # 2단계 이전 커밋
 ENABLE_POC=true npm run dev   # ADMIN 으로 로그인 후 /poc/gantt?n=3000
 ```
 

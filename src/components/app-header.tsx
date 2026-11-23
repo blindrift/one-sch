@@ -15,6 +15,7 @@ export async function AppHeader() {
           one-sch
         </Link>
         <Link href="/timeline">타임라인</Link>
+        <Link href="/projects">프로젝트</Link>
         {user?.role === 'ADMIN' ? <Link href="/admin/users">사용자 관리</Link> : null}
       </nav>
       {user ? (

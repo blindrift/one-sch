@@ -14,7 +14,14 @@ export type ErrorCode =
 
 export type ActionResult<T = void> =
   | { ok: true; data: T }
-  | { ok: false; code: ErrorCode; message: string; fieldErrors?: Record<string, string[]> };
+  | { ok: false; code: ErrorCode; message: string; reason?: string; fieldErrors?: Record<string, string[]> };
+
+/**
+ * 클라이언트에 사유(reason)를 실어 보내는 코드. CONFLICT 사유(version·archived·summary·duplicate 등)는 화면 분기용이고
+ * 문구로 이미 드러나는 내용이라 실어도 된다. 그 밖의 코드(특히 로그인 실패 UNAUTHENTICATED 의 사유)는 계정 상태를
+ * 드러낼 수 있어 싣지 않는다.
+ */
+const EXPOSED_REASON_CODES: ReadonlySet<ErrorCode> = new Set(['CONFLICT']);
 
 const MESSAGES: Record<ErrorCode, string> = {
   UNAUTHENTICATED: '로그인이 필요합니다.',
@@ -55,9 +62,13 @@ export async function toActionResult<T>(fn: () => Promise<T>): Promise<ActionRes
   } catch (err) {
     unstable_rethrow(err);
     if (err instanceof AppError) {
-      return err.fieldErrors
-        ? { ok: false, code: err.code, message: err.message, fieldErrors: err.fieldErrors }
-        : { ok: false, code: err.code, message: err.message };
+      return {
+        ok: false,
+        code: err.code,
+        message: err.message,
+        ...(err.reason && EXPOSED_REASON_CODES.has(err.code) ? { reason: err.reason } : {}),
+        ...(err.fieldErrors ? { fieldErrors: err.fieldErrors } : {}),
+      };
     }
     if (err instanceof ZodError) {
       const fieldErrors: Record<string, string[]> = {};

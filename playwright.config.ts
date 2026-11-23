@@ -46,7 +46,6 @@ export default defineConfig({
       AUTH_GOOGLE_SECRET: 'e2e-dummy-client-secret',
       CLIENT_IP_HEADER: 'x-real-ip',
       LOCAL_LOGIN_ENABLED: 'true',
-      ENABLE_POC: 'false',
       TZ: 'Asia/Seoul',
     },
   },

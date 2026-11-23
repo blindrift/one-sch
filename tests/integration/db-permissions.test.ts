@@ -70,3 +70,37 @@ describe('CHECK 제약', () => {
     );
   });
 });
+
+describe('0002(2단계 일정)', () => {
+  async function owner() {
+    return appDb.user.create({ data: { email: 'o@example.com', name: 'o' } });
+  }
+
+  it('앱 역할은 Project·Task·TaskDependency DML 을 할 수 있고 Project.version 기본값은 0', async () => {
+    const o = await owner();
+    const p = await appDb.project.create({ data: { key: 'AB', name: 'p', color: '#112233', ownerId: o.id } });
+    expect(p.version).toBe(0);
+    await appDb.project.update({ where: { id: p.id }, data: { version: { increment: 1 } } });
+    const d = new Date('2026-01-01T00:00:00Z');
+    const t1 = await appDb.task.create({ data: { projectId: p.id, title: 'a', startDate: d, endDate: d } });
+    const t2 = await appDb.task.create({ data: { projectId: p.id, title: 'b', startDate: d, endDate: d } });
+    const dep = await appDb.taskDependency.create({ data: { fromTaskId: t1.id, toTaskId: t2.id } });
+    await appDb.taskDependency.delete({ where: { id: dep.id } });
+    await appDb.task.delete({ where: { id: t1.id } });
+  });
+
+  it('제목·이름 길이 CHECK', async () => {
+    const o = await owner();
+    await expect(
+      appDb.project.create({ data: { key: 'AB', name: '', color: '#112233', ownerId: o.id } }),
+    ).rejects.toThrow(/Project_name_length_check/);
+    const p = await appDb.project.create({ data: { key: 'AC', name: 'p', color: '#112233', ownerId: o.id } });
+    const d = new Date('2026-01-01T00:00:00Z');
+    await expect(appDb.task.create({ data: { projectId: p.id, title: 'x'.repeat(201), startDate: d, endDate: d } })).rejects.toThrow(
+      /Task_title_length_check/,
+    );
+    await expect(appDb.task.create({ data: { projectId: p.id, title: '', startDate: d, endDate: d } })).rejects.toThrow(
+      /Task_title_length_check/,
+    );
+  });
+});
