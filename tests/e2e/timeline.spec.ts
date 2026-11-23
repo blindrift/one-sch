@@ -228,6 +228,58 @@ test('의존: 링크를 끌어 추가 → 새로고침 후 유지, 역방향(순
   expect(await auditActions()).toEqual(expect.arrayContaining(['dependency.create', 'dependency.delete']));
 });
 
+test('관련 링크·메모: 대화상자에서 넣고 저장 → DB·막대 표시, 다시 열면 값 유지, javascript: 링크는 거부', async ({ page, context }) => {
+  const m = await createUser('MEMBER');
+  const p = await createProject(m.id, { key: 'URL' });
+  await injectSession(context, m.id);
+  await gotoTimeline(page, '/projects/URL');
+  const dlg = page.getByRole('dialog');
+  const memo = '회의록 참고\n다음 주 재검토';
+
+  await page.getByRole('button', { name: '작업 추가' }).click();
+  await dlg.getByLabel('제목').fill('링크 작업');
+  await dlg.getByLabel('시작일').fill('2026-11-10');
+  await dlg.getByLabel('종료일').fill('2026-11-12');
+  await dlg.getByLabel('관련 링크(URL)').fill('https://example.com/browse/URL-1');
+  await dlg.getByLabel('메모', { exact: true }).fill(memo);
+  const open = dlg.getByTestId('task-url-open');
+  await expect(open).toHaveAttribute('href', 'https://example.com/browse/URL-1');
+  await expect(open).toHaveAttribute('target', '_blank');
+  await expect(open).toHaveAttribute('rel', 'noopener noreferrer');
+  await dlg.getByRole('button', { name: '저장' }).click();
+  await expect(dlg).toBeHidden();
+
+  const t = await ownerDb.task.findFirstOrThrow({ where: { projectId: p.id, title: '링크 작업' } });
+  expect(t).toMatchObject({ url: 'https://example.com/browse/URL-1', memo });
+  const marks = bar(page, t.id).getByTestId('bar-marks');
+  await expect(marks).toHaveAttribute('data-has-url', 'true');
+  await expect(marks).toHaveAttribute('title', /메모: 회의록 참고 다음 주 재검토/);
+
+  // 새로고침 뒤 다시 열면 값이 그대로다
+  await page.reload();
+  await page.locator('[data-testid="gantt"][data-ready="true"]').waitFor();
+  await bar(page, t.id).dblclick();
+  await expect(dlg.getByLabel('관련 링크(URL)')).toHaveValue('https://example.com/browse/URL-1');
+  await expect(dlg.getByLabel('메모', { exact: true })).toHaveValue(memo);
+
+  // javascript: 는 저장되지 않고, 열기 링크도 나오지 않는다
+  await dlg.getByLabel('관련 링크(URL)').fill('javascript:alert(1)');
+  await expect(dlg.getByTestId('task-url-open')).toHaveCount(0);
+  await dlg.getByRole('button', { name: '저장' }).click();
+  await expect(dlg.getByText('http:// 또는 https:// 로 시작하는 주소만 쓸 수 있습니다.').first()).toBeVisible();
+  const after = await ownerDb.task.findUniqueOrThrow({ where: { id: t.id } });
+  expect(after).toMatchObject({ url: 'https://example.com/browse/URL-1', version: t.version });
+
+  // 비우면 null 로 지워진다
+  await dlg.getByLabel('관련 링크(URL)').fill('');
+  await dlg.getByLabel('메모', { exact: true }).fill('   ');
+  await dlg.getByRole('button', { name: '저장' }).click();
+  await expect(dlg).toBeHidden();
+  await expect.poll(async () => (await ownerDb.task.findUniqueOrThrow({ where: { id: t.id } })).url).toBeNull();
+  expect((await ownerDb.task.findUniqueOrThrow({ where: { id: t.id } })).memo).toBeNull();
+  await expect(bar(page, t.id).getByTestId('bar-marks')).toHaveCount(0);
+});
+
 test('줌 일/주/월, 필터(프로젝트·담당자·상태, URL 유지), 접기', async ({ page, context }) => {
   const m = await createUser('MEMBER', '박담당');
   const za = await createProject(m.id, { key: 'ZA', name: '에이' });

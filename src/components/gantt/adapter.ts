@@ -32,7 +32,21 @@ export type GanttRow = {
   assigneeName: string;
   startYmd: string | null;
   endYmd: string | null;
+  /** 관련 링크가 있는지(막대의 🔗 표시) */
+  hasUrl: boolean;
+  /** 메모 앞부분(막대의 📝 표시·title). 없으면 빈 문자열 */
+  memoPreview: string;
 };
+
+/** 막대 title 에 넣을 메모 앞부분 길이 */
+export const MEMO_PREVIEW_MAX = 100;
+
+/** 메모 앞부분: 줄바꿈·연속 공백은 한 칸으로, 길면 말줄임 */
+export function memoPreview(memo: string | null): string {
+  if (!memo) return '';
+  const flat = memo.replace(/\s+/g, ' ').trim();
+  return flat.length > MEMO_PREVIEW_MAX ? `${flat.slice(0, MEMO_PREVIEW_MAX)}…` : flat;
+}
 
 export type GanttLink = { id: string; source: string; target: string; type: 'e2s' };
 
@@ -66,6 +80,8 @@ export function taskToRow(t: TaskDto, project: ProjectDto, userNames: ReadonlyMa
     assigneeName: t.assigneeId ? (userNames.get(t.assigneeId) ?? '') : '',
     startYmd: t.startDate,
     endYmd: t.endDate,
+    hasUrl: !!t.url,
+    memoPreview: memoPreview(t.memo),
   };
 }
 
@@ -87,6 +103,8 @@ export function projectToRow(p: ProjectDto, topLevel: readonly TaskDto[], open =
     assigneeName: '',
     startYmd,
     endYmd,
+    hasUrl: false,
+    memoPreview: '',
   };
   if (!startYmd || !endYmd) return { ...base, type: 'task', unscheduled: true };
   return {

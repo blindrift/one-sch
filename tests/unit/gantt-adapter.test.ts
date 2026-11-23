@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   dragPatch,
   filterTasks,
+  MEMO_PREVIEW_MAX,
+  memoPreview,
   projectRowId,
   projectToRow,
   toGanttLinks,
@@ -42,6 +44,8 @@ function task(over: Partial<TaskDto>): TaskDto {
     isMilestone: false,
     sortOrder: seq,
     version: 0,
+    url: null,
+    memo: null,
     hasChildren: false,
     ...over,
   };
@@ -165,5 +169,21 @@ describe('filterTasks', () => {
     const o = task({ id: 'o' });
     expect(filterTasks([r, k, o], (t) => t.assigneeId === 'u9').map((t) => t.id)).toEqual(['r', 'k']);
     expect(filterTasks([r, k, o], null)).toHaveLength(3);
+  });
+});
+
+describe('관련 링크·메모 표시', () => {
+  it('URL·메모가 있으면 hasUrl·memoPreview, 없으면 false·빈 문자열, 프로젝트 행은 항상 없음', () => {
+    const a = task({ id: 'u', url: 'https://example.com/a', memo: '첫 줄\n둘째   줄' });
+    const b = task({ id: 'n' });
+    const [proj, ra, rb] = toGanttRows({ projects: [P], tasks: [a, b], users: [], today: '2026-11-01' });
+    expect(proj).toMatchObject({ hasUrl: false, memoPreview: '' });
+    expect(ra).toMatchObject({ hasUrl: true, memoPreview: '첫 줄 둘째 줄' });
+    expect(rb).toMatchObject({ hasUrl: false, memoPreview: '' });
+  });
+  it('메모 앞부분은 MEMO_PREVIEW_MAX 자에서 자르고 말줄임', () => {
+    expect(memoPreview(null)).toBe('');
+    expect(memoPreview('x'.repeat(MEMO_PREVIEW_MAX))).toBe('x'.repeat(MEMO_PREVIEW_MAX));
+    expect(memoPreview('x'.repeat(MEMO_PREVIEW_MAX + 1))).toBe(`${'x'.repeat(MEMO_PREVIEW_MAX)}…`);
   });
 });

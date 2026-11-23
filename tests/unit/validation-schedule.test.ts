@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createProjectSchema, setProjectArchivedSchema, updateProjectSchema } from '@/lib/validation/project';
+import { isHttpUrl, TASK_MEMO_MAX, TASK_URL_MAX } from '@/lib/validation/limits';
 import { addDependencySchema, createTaskSchema, deleteTaskSchema, updateTaskSchema } from '@/lib/validation/task';
 
 const ID = '3f1c2b9e-8d4a-4c3b-9a2e-1f0e5d6c7b8a';
@@ -103,5 +104,58 @@ describe('제목·이름의 제어 문자(S-4)', () => {
       expect(createTaskSchema.safeParse({ ...taskBase, title: ok }).success).toBe(true);
       expect(createProjectSchema.safeParse({ ...projectBase, name: ok }).success).toBe(true);
     }
+  });
+});
+
+describe('작업의 관련 링크(url)·메모(memo)', () => {
+  const base = { projectId: ID, title: '설계', startDate: '2026-11-01', endDate: '2026-11-05' };
+  const upd = { id: ID, version: 0 };
+  it('생략하면 없음, http·https 허용(앞뒤 공백 trim)', () => {
+    expect(createTaskSchema.parse(base)).not.toHaveProperty('url');
+    expect(createTaskSchema.parse({ ...base, url: ' https://example.com/a?b=1#c ' }).url).toBe('https://example.com/a?b=1#c');
+    expect(createTaskSchema.parse({ ...base, url: 'http://intra.local:8080/x' }).url).toBe('http://intra.local:8080/x');
+    expect(updateTaskSchema.parse({ ...upd, url: 'https://jira.example.com/browse/ERP-1' }).url).toBe('https://jira.example.com/browse/ERP-1');
+  });
+  it('빈 문자열·공백·null 은 null(수정에서 지우기)', () => {
+    for (const v of ['', '   ', null]) {
+      expect(createTaskSchema.parse({ ...base, url: v, memo: v })).toMatchObject({ url: null, memo: null });
+      expect(updateTaskSchema.parse({ ...upd, url: v, memo: v })).toEqual({ ...upd, url: null, memo: null });
+    }
+  });
+  it.each(['javascript:alert(1)', 'JavaScript:alert(1)', ' javascript:alert(1)', 'data:text/html,<script>alert(1)</script>', 'vbscript:x', 'file:///etc/passwd', 'ftp://example.com', 'example.com', '/relative/path', 'mailto:a@b.c'])(
+    'url %s 거부',
+    (v) => {
+      expect(fieldsOf(createTaskSchema.safeParse({ ...base, url: v }))).toContain('url');
+      expect(fieldsOf(updateTaskSchema.safeParse({ ...upd, url: v }))).toContain('url');
+    },
+  );
+  it('url 제어 문자·길이 초과 거부', () => {
+    for (const v of ['https://a.com/\u0000', 'https://a.com/x\ty', 'https://a.com/\u202e', 'https://a.com/\u200b']) {
+      expect(fieldsOf(createTaskSchema.safeParse({ ...base, url: v }))).toContain('url');
+    }
+    const head = 'https://a.com/';
+    expect(createTaskSchema.safeParse({ ...base, url: head + 'x'.repeat(TASK_URL_MAX - head.length) }).success).toBe(true);
+    expect(fieldsOf(createTaskSchema.safeParse({ ...base, url: head + 'x'.repeat(TASK_URL_MAX - head.length + 1) }))).toContain('url');
+  });
+  it('memo 는 줄바꿈·탭·CRLF 허용, 앞뒤 공백 trim', () => {
+    expect(createTaskSchema.parse({ ...base, memo: '  첫 줄\n\t둘째 줄\r\n셋째 🚀  ' }).memo).toBe('첫 줄\n\t둘째 줄\r\n셋째 🚀');
+    expect(updateTaskSchema.parse({ ...upd, memo: 'a\nb' }).memo).toBe('a\nb');
+  });
+  it.each(['a\u0000b', 'a\u0007b', 'a\u000bb', 'a\u000cb', 'a\u001fb', 'a\u007fb', 'a\u0085b', 'a\u202eb', 'a\u2066b', 'a\u200bb', 'a\u2028b', 'a\ufeffb'].map((s) => [JSON.stringify(s), s]))(
+    'memo %s 거부',
+    (_, v) => {
+      expect(fieldsOf(createTaskSchema.safeParse({ ...base, memo: v }))).toContain('memo');
+      expect(fieldsOf(updateTaskSchema.safeParse({ ...upd, memo: v }))).toContain('memo');
+    },
+  );
+  it('memo 길이: 5000자 허용, 5001자 거부(trim 뒤 기준)', () => {
+    expect(createTaskSchema.safeParse({ ...base, memo: 'x'.repeat(TASK_MEMO_MAX) }).success).toBe(true);
+    expect(createTaskSchema.safeParse({ ...base, memo: ` ${'x'.repeat(TASK_MEMO_MAX)} ` }).success).toBe(true);
+    expect(fieldsOf(createTaskSchema.safeParse({ ...base, memo: 'x'.repeat(TASK_MEMO_MAX + 1) }))).toContain('memo');
+  });
+  it('isHttpUrl', () => {
+    expect(isHttpUrl('https://a.com')).toBe(true);
+    expect(isHttpUrl('http://a.com')).toBe(true);
+    for (const v of ['', 'javascript:alert(1)', 'data:,x', 'a.com', '//a.com']) expect(isHttpUrl(v)).toBe(false);
   });
 });

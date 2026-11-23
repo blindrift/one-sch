@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import type { DependencyDto, ProjectDto, TaskDeleteResult, TaskDto, TaskWriteResult, UserOption } from '@/lib/schedule/dto';
 import { moveCreatesHierarchyDependency, subtreeDependencyPartners } from '@/lib/schedule/graph';
 import { TASK_STATUSES, TASK_STATUS_LABELS, type TaskStatus } from '@/lib/schedule/status';
-import { TITLE_MAX } from '@/lib/validation/limits';
+import { isHttpUrl, TASK_MEMO_MAX, TASK_URL_MAX, TITLE_MAX } from '@/lib/validation/limits';
 import { createTask, deleteTask, updateTask } from '@/server/actions/task';
 
 export const SELECT_CLASS =
@@ -99,6 +99,8 @@ function TaskForm({
   const [progress, setProgress] = useState(String(task?.progress ?? 0));
   const [status, setStatus] = useState<TaskStatus>(task?.status ?? 'TODO');
   const [assigneeId, setAssigneeId] = useState(task?.assigneeId ?? '');
+  const [url, setUrl] = useState(task?.url ?? '');
+  const [memo, setMemo] = useState(task?.memo ?? '');
   const [error, setError] = useState<Failure | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -149,6 +151,8 @@ function TaskForm({
           status,
           assigneeId: assigneeId || null,
           isMilestone,
+          url: url.trim() || null,
+          memo: memo.trim() || null,
         });
         if (!r.ok) return fail(r);
         onSaved(r.data);
@@ -166,6 +170,8 @@ function TaskForm({
       }
       if (status !== task.status) patch.status = status;
       if ((assigneeId || null) !== task.assigneeId) patch.assigneeId = assigneeId || null;
+      if ((url.trim() || null) !== task.url) patch.url = url.trim() || null;
+      if ((memo.trim() || null) !== task.memo) patch.memo = memo.trim() || null;
       if (Object.keys(patch).length === 0) return onOpenChange(false);
       const r = await updateTask({ id: task.id, version: task.version, ...patch });
       if (!r.ok) return fail(r);
@@ -324,6 +330,44 @@ function TaskForm({
           </select>
           <FieldErrors errors={fe.assigneeId} />
         </div>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="task-url">관련 링크(URL)</Label>
+        <div className="flex items-center gap-2">
+          <Input
+            id="task-url"
+            type="url"
+            placeholder="https://"
+            maxLength={TASK_URL_MAX}
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          {/* href 에는 http/https 로 검증된 값만 넣는다(javascript: 등 차단) */}
+          {isHttpUrl(url.trim()) ? (
+            <a
+              href={url.trim()}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 text-sm text-primary underline underline-offset-4"
+              data-testid="task-url-open"
+            >
+              열기
+            </a>
+          ) : null}
+        </div>
+        <FieldErrors errors={fe.url} />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="task-memo">메모</Label>
+        <textarea
+          id="task-memo"
+          rows={4}
+          maxLength={TASK_MEMO_MAX}
+          className="min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
+          value={memo}
+          onChange={(e) => setMemo(e.target.value)}
+        />
+        <FieldErrors errors={fe.memo} />
       </div>
       {task && dependencies.length ? (
         <div className="flex flex-col gap-1.5" data-testid="task-dependencies">

@@ -5,6 +5,9 @@ export const NAME_MAX = 100;
 export const EMAIL_MAX = 254;
 export const TITLE_MAX = 200;
 export const PROJECT_NAME_MAX = 100;
+/** 작업의 관련 링크·메모 길이 한도(0003 마이그레이션의 CHECK 와 같은 값) */
+export const TASK_URL_MAX = 2000;
+export const TASK_MEMO_MAX = 5000;
 export const PROJECT_KEY_RE = /^[A-Z][A-Z0-9]{1,9}$/;
 export const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 /**
@@ -13,3 +16,15 @@ export const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
  */
 export const UNSAFE_TEXT_RE = /[\u0000-\u001f\u007f-\u009f\u061c\u200b\u200c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]/;
 export const UNSAFE_TEXT_MESSAGE = '제어 문자나 방향 제어 문자는 쓸 수 없습니다.';
+/** 메모(여러 줄)에 둘 수 없는 문자: UNSAFE_TEXT_RE 에서 줄바꿈(LF·CR)과 탭만 뺐다. */
+export const UNSAFE_MEMO_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u061c\u200b\u200c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]/;
+
+/** http·https 로 파싱되는 절대 URL 인지(javascript:, data: 등은 거짓). 화면에서 href 에 넣기 전에도 쓴다. */
+export function isHttpUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
