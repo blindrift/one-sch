@@ -130,6 +130,12 @@ test('빈 곳을 끌어 작업 추가: 끈 날짜·행(형제/하위)으로 대�
   await page.mouse.down();
   await page.mouse.move(xOf(13), yTop, { steps: 4 });
   await expect(page.getByTestId('gantt-range')).toContainText('2026-11-20 ~ 2026-11-23');
+  // 강조 상자는 끈 칸(11-20~11-23, 기준 행) 바로 위에 있어야 한다
+  const rb = (await page.getByTestId('gantt-range').boundingBox())!;
+  expect(Math.abs(rb.x - (box.x + 10 * DAY_CELL))).toBeLessThanOrEqual(2);
+  expect(Math.abs(rb.width - 4 * DAY_CELL)).toBeLessThanOrEqual(2);
+  expect(rb.y).toBeLessThanOrEqual(yTop);
+  expect(rb.y + rb.height).toBeGreaterThanOrEqual(yTop);
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('gantt-range')).toHaveCount(0);
   await page.mouse.up();
