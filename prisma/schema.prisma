@@ -130,6 +130,8 @@ model Project {
   archived  Boolean       @default(false)
   /// 이슈 번호 발급용 카운터
   issueSeq  Int           @default(0)
+  /// 낙관적 잠금(동시 편집 충돌 감지)
+  version   Int           @default(0)
   createdAt DateTime      @default(now()) @db.Timestamptz(6)
   updatedAt DateTime      @updatedAt @db.Timestamptz(6)
 
