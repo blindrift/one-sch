@@ -10,7 +10,7 @@ import { AppError } from '../action-result';
 import { diffFields, writeAudit } from '../audit';
 import { prisma, type Tx } from '../db';
 import type { RequestMeta } from '../request-meta';
-import { conflict, ensureActiveUser, toTaskDto, validation, type Actor, type TaskDto } from './schedule-dto';
+import { conflict, ensureActiveUser, ensureWritableProject, toTaskDto, validation, type Actor, type TaskDto } from './schedule-dto';
 import { lockProject, SCHEDULE_TX } from './schedule-lock';
 
 export type { TaskDeleteResult, TaskWriteResult };
@@ -38,13 +38,6 @@ async function projectIdOf(taskId: string): Promise<string> {
   const t = await prisma.task.findUnique({ where: { id: taskId }, select: { projectId: true } });
   if (!t) throw new AppError('NOT_FOUND');
   return t.projectId;
-}
-
-/** 잠금을 잡은 뒤 프로젝트가 있고 보관되지 않았는지 확인한다(D6). */
-async function ensureWritableProject(tx: Tx, projectId: string): Promise<void> {
-  const p = await tx.project.findUnique({ where: { id: projectId }, select: { archived: true } });
-  if (!p) throw new AppError('NOT_FOUND');
-  if (p.archived) throw conflict('archived');
 }
 
 /** 프로젝트 안 작업의 상위 관계(잠금 안에서 읽는다) */

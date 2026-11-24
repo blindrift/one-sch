@@ -34,6 +34,10 @@ export const ACTION_POLICY: Record<string, Policy> = {
 
   'dependency.addDependency': { min: 'MEMBER' },
   'dependency.removeDependency': { min: 'MEMBER' },
+
+  'issue.createIssue': { min: 'MEMBER' },
+  'issue.updateIssue': { min: 'MEMBER' },
+  'issue.deleteIssue': { min: 'MEMBER' },
 };
 
 export const PUBLIC_ACTIONS = Object.entries(ACTION_POLICY)

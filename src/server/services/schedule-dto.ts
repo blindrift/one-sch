@@ -92,6 +92,13 @@ export async function ensureActiveUser(tx: Tx, userId: string, field: string): P
   }
 }
 
+/** 잠금을 잡은 뒤 프로젝트가 있고 보관되지 않았는지 확인한다(D6, 이슈·댓글은 D18). */
+export async function ensureWritableProject(tx: Tx, projectId: string): Promise<void> {
+  const p = await tx.project.findUnique({ where: { id: projectId }, select: { archived: true } });
+  if (!p) throw new AppError('NOT_FOUND');
+  if (p.archived) throw conflict('archived');
+}
+
 export function conflict(reason: 'version' | 'archived' | string, message?: string): AppError {
   const messages: Record<string, string> = {
     archived: '보관된 프로젝트는 수정할 수 없습니다. 보관을 해제한 뒤 다시 시도해 주세요.',
