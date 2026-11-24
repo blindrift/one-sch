@@ -12,6 +12,7 @@ import type { TaskSort } from '@/lib/list-query';
 import type { ProjectDto, TimelineData } from '@/lib/schedule/dto';
 import { TASK_STATUS_COLORS, TASK_STATUS_LABELS } from '@/lib/schedule/status';
 import type { TaskListRow } from '@/lib/task-list';
+import { siblingAnchor } from '@/lib/schedule/reorder';
 import { reorderTask } from '@/server/actions/task';
 import { TaskFormDialog, type DependencyItem } from '../../../timeline/task-form-dialog';
 
@@ -53,6 +54,7 @@ export function TaskListView({
   const [reordering, startReorder] = useTransition();
   const refresh = () => router.refresh();
   const canReorder = canEdit && orderMode;
+  const titleOf = (id: string) => rows.find((r) => r.id === id)?.title ?? '';
   const dndId = useId();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -66,14 +68,14 @@ export function TaskListView({
     const from = rows.findIndex((r) => r.id === activeId);
     const to = rows.findIndex((r) => r.id === overId);
     const moving = rows[from];
-    const anchor = rows[to];
-    if (!moving || !anchor) return;
-    if (moving.parentId !== anchor.parentId) {
+    // 놓은 행이 형제의 하위면 그 형제를 기준으로 삼는다(다른 상위 아래·자기 하위면 거부)
+    const anchorId = moving && to >= 0 ? siblingAnchor(new Map(data.tasks.map((t) => [t.id, t.parentId])), moving.id, overId) : null;
+    if (!moving || !anchorId) {
       setMessage('같은 상위 작업 아래의 작업끼리만 순서를 바꿀 수 있습니다.');
       return;
     }
     startReorder(async () => {
-      const r = await reorderTask({ id: moving.id, version: moving.version, ...(from < to ? { afterId: anchor.id } : { beforeId: anchor.id }) });
+      const r = await reorderTask({ id: moving.id, version: moving.version, ...(from < to ? { afterId: anchorId } : { beforeId: anchorId }) });
       setMessage(r.ok ? null : r.message);
       refresh();
     });
@@ -138,6 +140,12 @@ export function TaskListView({
           collisionDetection={closestCenter}
           onDragEnd={onDragEnd}
           accessibility={{
+            announcements: {
+              onDragStart: ({ active }) => `${titleOf(String(active.id))} 행을 들었습니다.`,
+              onDragOver: ({ over }) => (over ? `${titleOf(String(over.id))} 위치` : '표 밖'),
+              onDragEnd: ({ over }) => (over ? `${titleOf(String(over.id))} 위치에 놓았습니다.` : '옮기지 않았습니다.'),
+              onDragCancel: () => '옮기기를 취소했습니다.',
+            },
             screenReaderInstructions: { draggable: '순서를 바꾸려면 Space 를 누르고 위·아래 화살표로 옮긴 뒤 Space 로 놓습니다. Esc 는 취소입니다.' },
           }}
         >

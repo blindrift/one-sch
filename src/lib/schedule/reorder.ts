@@ -23,3 +23,19 @@ export function sortOrdersFor(oldValues: readonly number[]): number[] {
   const strictly = sorted.every((v, i) => i === 0 || v > sorted[i - 1]);
   return strictly ? sorted : sorted.map((_, i) => (sorted[0] ?? 0) + i);
 }
+
+/**
+ * 목록에서 끌어 놓은 행(overId)을 형제 기준으로 바꾼다. 놓은 행이 형제면 그대로, 형제의 후손이면 그 형제를 기준으로
+ * 삼는다(형제 사이에 하위 행이 끼어 있어도 옮길 수 있게). 자기 후손이거나 다른 상위 아래면 null.
+ */
+export function siblingAnchor(parentOf: ReadonlyMap<string, string | null>, movingId: string, overId: string): string | null {
+  if (!parentOf.has(movingId) || !parentOf.has(overId)) return null;
+  const parent = parentOf.get(movingId) ?? null;
+  const seen = new Set<string>();
+  for (let cur: string | null = overId; cur && !seen.has(cur); cur = parentOf.get(cur) ?? null) {
+    seen.add(cur);
+    if (cur === movingId) return null;
+    if ((parentOf.get(cur) ?? null) === parent) return cur;
+  }
+  return null;
+}

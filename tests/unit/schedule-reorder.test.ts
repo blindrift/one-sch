@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { reorderIds, sortOrdersFor } from '@/lib/schedule/reorder';
+import { reorderIds, siblingAnchor, sortOrdersFor } from '@/lib/schedule/reorder';
 import { reorderTaskSchema } from '@/lib/validation/task';
 
 const ids = ['a', 'b', 'c', 'd'];
@@ -42,5 +42,28 @@ describe('reorderTaskSchema', () => {
     expect(reorderTaskSchema.safeParse({ id: ID, version: 0, beforeId: ID2, afterId: ID2 }).success).toBe(false);
     expect(reorderTaskSchema.safeParse({ id: ID, version: 0, beforeId: ID }).success).toBe(false);
     expect(reorderTaskSchema.safeParse({ id: ID, version: 0, beforeId: 'x' }).success).toBe(false);
+  });
+});
+
+describe('siblingAnchor', () => {
+  // a ─ a1 ─ a1x, b, c ─ c1
+  const parentOf = new Map<string, string | null>([
+    ['a', null],
+    ['a1', 'a'],
+    ['a1x', 'a1'],
+    ['b', null],
+    ['c', null],
+    ['c1', 'c'],
+  ]);
+  it('형제면 그대로, 형제의 후손이면 그 형제', () => {
+    expect(siblingAnchor(parentOf, 'b', 'c')).toBe('c');
+    expect(siblingAnchor(parentOf, 'b', 'a1x')).toBe('a');
+    expect(siblingAnchor(parentOf, 'c', 'a1')).toBe('a');
+  });
+  it('자기 후손·다른 상위 아래·없는 id 는 null', () => {
+    expect(siblingAnchor(parentOf, 'a', 'a1x')).toBeNull();
+    expect(siblingAnchor(parentOf, 'a1', 'b')).toBeNull();
+    expect(siblingAnchor(parentOf, 'c1', 'a1')).toBeNull();
+    expect(siblingAnchor(parentOf, 'zz', 'a')).toBeNull();
   });
 });
