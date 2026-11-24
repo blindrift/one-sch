@@ -147,6 +147,9 @@
 | T-9 | MEMBER 정상 조작(보드·재정렬)에서 next-action POST ≥ 2 대조 |
 | T-10 | 보드 카드 Enter 로 열기 E2E(끌기 상태가 되지 않음) + 마우스 누르기 |
 
+1회차 수정 뒤 검증: typecheck·lint 통과, 단위 35파일 531건, 단위+통합 `--sequence.shuffle` 50파일 698건(3회 통과), E2E 전체 46건(build 포함), 바뀐 3개 스펙 `--repeat-each=3` 42건, `npm audit --omit=dev` 0건.
+F2(id 2차 정렬)로 sortOrder 가 같은 작업의 순서가 id 순이 되어, 삽입 순서에 기대던 `timeline-service.test` 한 건에 sortOrder 를 명시했다.
+
 ## 9. 실행 방법 메모
 
 NAS 호스트에서는 Prisma 가 segfault 하므로 1·2단계와 같이 `mcr.microsoft.com/playwright:v1.65.1-noble` 컨테이너(`--network host`, `node_modules` 는 볼륨 `one-sch-test-nm`, Node 22 는 볼륨 `one-sch-test-node22`)에서 실행했다. 의존성 설치는 같은 컨테이너에서 `npx npm@11.6.2 install --save-exact …`(4절 참고).

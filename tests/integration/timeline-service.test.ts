@@ -17,8 +17,9 @@ describe('timeline-service', () => {
     await prisma.user.create({ data: { email: 'off@example.com', name: '꺼짐', active: false } });
     const live = await prisma.project.create({ data: { key: 'LIVE', name: 'l', color: '#111111', ownerId: me.id } });
     const old = await prisma.project.create({ data: { key: 'OLD', name: 'o', color: '#222222', ownerId: me.id, archived: true } });
-    const a = await prisma.task.create({ data: { projectId: live.id, title: 'a', startDate: D, endDate: D } });
-    const b = await prisma.task.create({ data: { projectId: live.id, title: 'b', startDate: D, endDate: D, parentId: a.id } });
+    // sortOrder 가 같으면 id 순(F2)이므로 순서를 단언하려고 sortOrder 를 준다
+    const a = await prisma.task.create({ data: { projectId: live.id, title: 'a', startDate: D, endDate: D, sortOrder: 1 } });
+    const b = await prisma.task.create({ data: { projectId: live.id, title: 'b', startDate: D, endDate: D, parentId: a.id, sortOrder: 2 } });
     const x = await prisma.task.create({ data: { projectId: old.id, title: 'x', startDate: D, endDate: D } });
     await prisma.taskDependency.create({ data: { fromTaskId: b.id, toTaskId: x.id } });
     const inner = await prisma.taskDependency.create({ data: { fromTaskId: a.id, toTaskId: b.id } });
