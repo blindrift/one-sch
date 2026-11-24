@@ -3,7 +3,7 @@ import { AppShell } from '@/components/app-shell';
 import { FilterBar } from '@/components/list/filter-bar';
 import { Pager, type SortLink } from '@/components/list/pager';
 import { ProjectTabs, ProjectTitle } from '@/components/project-header';
-import { DEFAULT_TASK_QUERY, NO_ASSIGNEE, parseTaskListQuery, TASK_SORTS, toQueryString, type SearchParams, type TaskListQuery, type TaskSort } from '@/lib/list-query';
+import { DEFAULT_TASK_QUERY, isOrderMode, NO_ASSIGNEE, parseTaskListQuery, TASK_SORTS, toQueryString, type SearchParams, type TaskListQuery, type TaskSort } from '@/lib/list-query';
 import { hasRole } from '@/lib/roles';
 import { TASK_STATUSES, TASK_STATUS_LABELS } from '@/lib/schedule/status';
 import { PROJECT_KEY_RE } from '@/lib/validation/limits';
@@ -61,6 +61,7 @@ export default async function ProjectListPage({ params, searchParams }: { params
         canEdit={hasRole(me.role, 'MEMBER') && !project.archived}
         sortLinks={sortLinks}
         orderLink={sortLinks.order}
+        orderMode={isOrderMode(query)}
       />
       <Pager page={list.page} pageCount={list.pageCount} total={list.total} hrefFor={(page) => href({ page })} />
     </AppShell>

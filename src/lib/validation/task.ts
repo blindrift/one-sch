@@ -88,6 +88,17 @@ export const updateTaskSchema = z
 
 export const deleteTaskSchema = z.object({ id: id('잘못된 작업입니다.'), version });
 
+/** 형제 순서 바꾸기(D17): 기준 형제 앞(beforeId) 또는 뒤(afterId) 중 하나만 */
+export const reorderTaskSchema = z
+  .object({
+    id: id('잘못된 작업입니다.'),
+    version,
+    beforeId: id('잘못된 기준 작업입니다.').optional(),
+    afterId: id('잘못된 기준 작업입니다.').optional(),
+  })
+  .refine((v) => (v.beforeId === undefined) !== (v.afterId === undefined), { path: ['beforeId'], message: '기준 작업을 하나만 지정해 주세요.' })
+  .refine((v) => v.beforeId !== v.id && v.afterId !== v.id, { path: ['beforeId'], message: '자기 자신을 기준으로 옮길 수 없습니다.' });
+
 export const addDependencySchema = z
   .object({ fromTaskId: id('잘못된 작업입니다.'), toTaskId: id('잘못된 작업입니다.') })
   .refine((v) => v.fromTaskId !== v.toTaskId, { path: ['toTaskId'], message: '자기 자신에 의존할 수 없습니다.' });
@@ -97,4 +108,5 @@ export const removeDependencySchema = z.object({ id: id('잘못된 의존 관계
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
 export type DeleteTaskInput = z.infer<typeof deleteTaskSchema>;
+export type ReorderTaskInput = z.infer<typeof reorderTaskSchema>;
 export type AddDependencyInput = z.infer<typeof addDependencySchema>;

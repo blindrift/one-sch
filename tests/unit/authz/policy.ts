@@ -31,6 +31,7 @@ export const ACTION_POLICY: Record<string, Policy> = {
   'task.createTask': { min: 'MEMBER' },
   'task.updateTask': { min: 'MEMBER' },
   'task.deleteTask': { min: 'MEMBER' },
+  'task.reorderTask': { min: 'MEMBER' },
 
   'dependency.addDependency': { min: 'MEMBER' },
   'dependency.removeDependency': { min: 'MEMBER' },

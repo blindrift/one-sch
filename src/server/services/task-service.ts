@@ -3,9 +3,10 @@ import type { Prisma } from '@prisma/client';
 import { parseYmd, toYmd } from '@/lib/dates';
 import { depthOf, isAncestor, moveCreatesHierarchyDependency, subtreeHeight, type ParentMap } from '@/lib/schedule/graph';
 import { summarize } from '@/lib/schedule/rollup';
-import type { TaskDeleteResult, TaskWriteResult } from '@/lib/schedule/dto';
+import type { TaskDeleteResult, TaskReorderResult, TaskWriteResult } from '@/lib/schedule/dto';
+import { reorderIds, sortOrdersFor } from '@/lib/schedule/reorder';
 import { MAX_TASK_DEPTH } from '@/lib/schedule/status';
-import type { CreateTaskInput, DeleteTaskInput, UpdateTaskInput } from '@/lib/validation/task';
+import type { CreateTaskInput, DeleteTaskInput, ReorderTaskInput, UpdateTaskInput } from '@/lib/validation/task';
 import { AppError } from '../action-result';
 import { diffFields, writeAudit } from '../audit';
 import { prisma, type Tx } from '../db';
@@ -13,7 +14,7 @@ import type { RequestMeta } from '../request-meta';
 import { conflict, ensureActiveUser, ensureWritableProject, toTaskDto, validation, type Actor, type TaskDto } from './schedule-dto';
 import { lockProject, SCHEDULE_TX } from './schedule-lock';
 
-export type { TaskDeleteResult, TaskWriteResult };
+export type { TaskDeleteResult, TaskReorderResult, TaskWriteResult };
 
 /** 감사·비교용 스냅샷(날짜는 ymd) */
 function snapshot(t: TaskDto) {
@@ -299,5 +300,61 @@ export async function deleteTask(actor: Actor, input: DeleteTaskInput, meta: Req
       meta,
     });
     return { deletedIds: allIds, ancestors };
+  }, SCHEDULE_TX);
+}
+
+/**
+ * 형제 순서 바꾸기(D17). 같은 상위 아래 형제끼리만 옮긴다(기준 작업이 다른 상위면 VALIDATION `sibling`).
+ * 프로젝트 잠금 안에서 형제를 다시 읽어 순서를 매기므로 동시에 옮겨도 형제 sortOrder 가 겹치지 않는다.
+ * 옮긴 작업만 version 을 올리고(낙관적 잠금), 감사 task.reorder 에 전후 형제 순서를 남긴다. 순서가 그대로면 아무것도 쓰지 않는다.
+ */
+export async function reorderTask(actor: Actor, input: ReorderTaskInput, meta: RequestMeta): Promise<TaskReorderResult> {
+  const projectId = await projectIdOf(input.id);
+  const anchorId = (input.beforeId ?? input.afterId)!;
+  return prisma.$transaction(async (tx) => {
+    await lockProject(tx, projectId);
+    const row = await tx.task.findUnique({ where: { id: input.id } });
+    if (!row) throw new AppError('NOT_FOUND');
+    if (row.version !== input.version) throw conflict('version');
+    await ensureWritableProject(tx, projectId);
+    const anchor = await tx.task.findUnique({ where: { id: anchorId }, select: { projectId: true, parentId: true } });
+    if (!anchor || anchor.projectId !== projectId || anchor.parentId !== row.parentId) {
+      throw validation('beforeId', '같은 상위 작업 아래의 작업끼리만 순서를 바꿀 수 있습니다.', 'sibling');
+    }
+    const siblings = await tx.task.findMany({
+      where: { projectId, parentId: row.parentId },
+      select: { id: true, sortOrder: true },
+      orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+    });
+    const before = siblings.map((t) => t.id);
+    const after = reorderIds(before, row.id, input.beforeId ? { beforeId: input.beforeId } : { afterId: input.afterId! });
+    if (!after) throw validation('beforeId', '같은 상위 작업 아래의 작업끼리만 순서를 바꿀 수 있습니다.', 'sibling');
+    const summary = await hasChildren(tx, row.id);
+    if (after.every((id, i) => id === before[i])) return { task: toTaskDto(row, summary), siblings: [] };
+
+    const values = sortOrdersFor(siblings.map((t) => t.sortOrder));
+    const old = new Map(siblings.map((t) => [t.id, t.sortOrder]));
+    const changed: Array<{ id: string; sortOrder: number }> = [];
+    for (const [i, id] of after.entries()) {
+      if (old.get(id) === values[i] && id !== row.id) continue;
+      if (id === row.id) {
+        const { count } = await tx.task.updateMany({ where: { id, version: row.version }, data: { sortOrder: values[i], version: { increment: 1 } } });
+        if (count !== 1) throw conflict('version');
+      } else {
+        await tx.task.update({ where: { id }, data: { sortOrder: values[i] } });
+      }
+      changed.push({ id, sortOrder: values[i] });
+    }
+    await writeAudit(tx, {
+      actorId: actor.id,
+      action: 'task.reorder',
+      entity: 'Task',
+      entityId: row.id,
+      before: { parentId: row.parentId, order: before },
+      after: { parentId: row.parentId, order: after },
+      meta,
+    });
+    const task = toTaskDto(await tx.task.findUniqueOrThrow({ where: { id: row.id } }), summary);
+    return { task, siblings: changed };
   }, SCHEDULE_TX);
 }
