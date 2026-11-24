@@ -590,6 +590,61 @@ describe('정적 권한 검사', () => {
   });
 });
 
+/** 마크다운(이슈 설명·댓글) 렌더 규칙(설계서 5.2, D23): raw HTML 을 DOM 에 넣는 길을 저장소 전체에서 막는다. */
+describe('마크다운·HTML 주입 정적 검사', () => {
+  /** JSX 속성·객체 키로 쓰인 dangerouslySetInnerHTML 위치(주석·문자열은 무시) */
+  function innerHtmlUses(sf: ts.SourceFile): string[] {
+    const found: string[] = [];
+    const visit = (node: ts.Node) => {
+      const name =
+        ts.isJsxAttribute(node) || ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node) || ts.isPropertyAccessExpression(node)
+          ? node.name.getText(sf)
+          : ts.isElementAccessExpression(node) && ts.isStringLiteral(node.argumentExpression)
+            ? node.argumentExpression.text
+            : null;
+      if (name === 'dangerouslySetInnerHTML' || name === 'innerHTML' || name === 'outerHTML') {
+        found.push(`${sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1}행 ${name}`);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    return found;
+  }
+
+  it('src 어디에서도 dangerouslySetInnerHTML·innerHTML·outerHTML 을 쓰지 않는다', () => {
+    const problems = srcFiles.flatMap((f) => innerHtmlUses(parse(f)).map((p) => `${rel(f)}: ${p}`));
+    expect(problems).toEqual([]);
+  });
+
+  it('rehype-raw(마크다운 안 HTML 허용) 같은 raw HTML 플러그인을 import 하지 않는다', () => {
+    const banned = /^(rehype-raw|rehype-dom-raw|remark-html|marked|markdown-it|html-react-parser)(\/|$)/;
+    const problems = repoFiles.flatMap((f) =>
+      collectImports(parse(f), f)
+        .filter((i) => banned.test(i.module))
+        .map((i) => `${rel(f)}: ${i.module}`),
+    );
+    expect(problems).toEqual([]);
+  });
+
+  it("react-markdown 은 components/markdown.tsx 에서만 쓰고, 그 파일은 'server-only' 이며 'use client' 파일이 import 하지 않는다", () => {
+    const MD = 'src/components/markdown.tsx';
+    const problems: string[] = [];
+    for (const f of srcFiles) {
+      const imps = collectImports(parse(f), f);
+      if (rel(f) !== MD && imps.some((i) => /^(react-markdown|remark-gfm)(\/|$)/.test(i.module))) problems.push(`${rel(f)}: react-markdown 직접 사용`);
+      if (directives(parse(f).statements).includes('use client') && imps.some((i) => i.file && rel(i.file) === MD)) problems.push(`${rel(f)}: 클라이언트 파일이 markdown 을 import`);
+    }
+    const md = collectImports(parse(join(ROOT, MD)), join(ROOT, MD));
+    if (!md.some((i) => i.module === 'server-only' && i.kind === 'side-effect')) problems.push(`${MD}: import 'server-only' 없음`);
+    expect(problems).toEqual([]);
+  });
+
+  it('음성 검증: dangerouslySetInnerHTML 사용을 잡는다', () => {
+    const sf = ts.createSourceFile('x.tsx', 'export const A = () => <div dangerouslySetInnerHTML={{ __html: x }} />; el.innerHTML = s;', ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    expect(innerHtmlUses(sf)).toHaveLength(2);
+  });
+});
+
 /** 위 검사 함수들이 우회 코드를 실제로 잡는지(음성 검증) */
 describe('정적 검사 자체의 음성 검증', () => {
   const src = (code: string) => ts.createSourceFile('x.tsx', code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
