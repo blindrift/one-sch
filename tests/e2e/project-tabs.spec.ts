@@ -1,4 +1,20 @@
-import { createProject, createTask, createUser, dragTo, expect, gotoReady, gotoTimeline, injectSession, ownerDb, resetAndSeed, test, watchActions } from './fixtures';
+import {
+  createProject,
+  createTask,
+  createUser,
+  dndAnnouncer,
+  dragTo,
+  expect,
+  gotoReady,
+  gotoTimeline,
+  injectSession,
+  keyboardPickUp,
+  keyboardPickUpDenied,
+  ownerDb,
+  resetAndSeed,
+  test,
+  watchActions,
+} from './fixtures';
 
 test.beforeEach(resetAndSeed);
 
@@ -85,6 +101,9 @@ test('목록 탭 행 순서: 마우스·키보드로 형제 순서를 바꾸면 
     (await ownerDb.task.findMany({ where: { projectId: p.id, parentId: null }, orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] })).map((t) => t.title);
 
   await gotoReady(page, '/projects/ORD/list');
+  const ok = watchActions(page);
+  // 저장 뒤 다시 읽기가 끝나 끌기 잠금이 풀릴 때까지(F3: 저장 중에는 끌 수 없다)
+  const idle = () => expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
   const handle = (title: string) => page.getByRole('button', { name: `순서 옮기기: ${title}` });
   const row = (id: string) => page.getByTestId(`task-row-${id}`);
 
@@ -96,17 +115,24 @@ test('목록 탭 행 순서: 마우스·키보드로 형제 순서를 바꾸면 
   expect(log.after).toMatchObject({ order: [c.id, a.id, b.id] });
 
   // 키보드: 나 작업을 한 칸 위로(Space → ↑ → Space). 바로 위 행은 가의 하위라 그 상위(가 작업) 앞으로 간다
-  await handle('나 작업').focus();
-  await page.keyboard.press('Space');
-  // dnd-kit 키보드 센서는 시작 직후 다음 틱에 화살표 처리기를 붙인다
-  await page.waitForTimeout(150);
+  await idle();
+  await keyboardPickUp(page, handle('나 작업'));
   await page.keyboard.press('ArrowUp');
-  await page.waitForTimeout(150);
+  await expect(dndAnnouncer(page)).toContainText('가의 하위 위치');
   await page.keyboard.press('Space');
   await expect.poll(order).toEqual(['다 작업', '나 작업', '가 작업']);
+  // 대조: 정상 조작은 서버 요청을 만든다(아래 거부 경우의 0 과 비교)
+  expect(ok.count()).toBeGreaterThanOrEqual(2);
+
+  await expect(page.getByTestId('task-list').locator('tbody tr').nth(1)).toContainText('나 작업');
+  await idle();
+  // 자기 하위 위로 놓으면 별도 문구(F3)
+  await dragTo(page, handle('가 작업'), row(child.id));
+  await expect(page.getByTestId('list-message')).toContainText('자기 하위 작업 위치로는 옮길 수 없습니다');
 
   // 하위 작업을 최상위 행 위로 끌면 거부(메시지, DB 불변)
   const actions = watchActions(page);
+  await idle();
   await dragTo(page, handle('가의 하위'), row(c.id), { toY: 'top' });
   await expect(page.getByTestId('list-message')).toContainText('같은 상위 작업 아래');
   await actions.settle();
@@ -138,11 +164,8 @@ test('보관 프로젝트: 목록·보드·이슈 탭이 읽기 전용(추가·�
   await expect(page.getByRole('dialog')).toHaveCount(0);
 
   await gotoReady(page, '/projects/ARC/board');
-  await dragTo(page, page.getByTestId(`board-card-${t.id}`), page.getByTestId('board-col-DONE'));
-  await page.getByTestId(`board-card-${t.id}`).focus();
-  await page.keyboard.press('Space');
-  await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('Space');
+  await dragTo(page, page.getByTestId(`board-card-${t.id}`), page.getByTestId('board-col-DONE'), { expectDrag: false });
+  await keyboardPickUpDenied(page, page.getByTestId(`board-card-${t.id}`));
   await expect(page.getByTestId('board-col-TODO').getByTestId(`board-card-${t.id}`)).toBeVisible();
 
   await gotoReady(page, '/projects/ARC/issues?issue=ARC-1');

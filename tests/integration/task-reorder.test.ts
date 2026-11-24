@@ -155,11 +155,11 @@ describe('reorderTask', () => {
     const b = await add('b');
     const c = await add('c');
     await prisma.task.updateMany({ where: { id: { in: [a.id, b.id, c.id] } }, data: { sortOrder: 5 } });
-    await tasks.reorderTask(me, { id: c.id, version: 0, beforeId: a.id }, meta);
+    // 겹친 값은 id 순으로 읽힌다. 그 순서의 첫 작업을 마지막 뒤로 옮긴다(반드시 순서가 바뀌는 이동)
+    const [first, , last] = [a, b, c].sort((x, y) => (x.id < y.id ? -1 : 1));
+    await tasks.reorderTask(me, { id: first.id, version: 0, afterId: last.id }, meta);
     const rows = await prisma.task.findMany({ where: { projectId }, orderBy: { sortOrder: 'asc' } });
     expect(rows.map((t) => t.sortOrder)).toEqual([5, 6, 7]);
-    // 겹친 값은 id 순으로 읽혔다가 c 가 a 바로 앞으로 간다
-    const titles = rows.map((t) => t.title);
-    expect(titles.indexOf('c') + 1).toBe(titles.indexOf('a'));
+    expect(rows[2].id).toBe(first.id);
   });
 });

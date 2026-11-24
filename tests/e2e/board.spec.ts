@@ -1,4 +1,21 @@
-import { auditActions, createIssue, createProject, createTask, createUser, dragTo, expect, gotoReady, injectSession, ownerDb, resetAndSeed, test, watchActions } from './fixtures';
+import {
+  auditActions,
+  createIssue,
+  createProject,
+  createTask,
+  createUser,
+  dndAnnouncer,
+  dragTo,
+  expect,
+  gotoReady,
+  injectSession,
+  keyboardPickUp,
+  keyboardPickUpDenied,
+  ownerDb,
+  resetAndSeed,
+  test,
+  watchActions,
+} from './fixtures';
 
 test.beforeEach(resetAndSeed);
 
@@ -14,6 +31,7 @@ test('작업 보드: 마우스로 열을 옮기면 상태가 DB·감사에 남�
   const status = async (id: string) => (await ownerDb.task.findUniqueOrThrow({ where: { id } })).status;
 
   await gotoReady(page, '/projects/BRD/board');
+  const ok = watchActions(page);
   const board = page.getByTestId('board');
   await expect(board).toContainText('마일스톤 카드');
   await expect(board).not.toContainText('상위 카드');
@@ -22,18 +40,17 @@ test('작업 보드: 마우스로 열을 옮기면 상태가 DB·감사에 남�
   await expect(page.getByTestId('board-col-DONE').getByTestId(`board-card-${a.id}`)).toBeVisible();
   await expect.poll(() => status(a.id)).toBe('DONE');
 
-  await page.getByTestId(`board-card-${b.id}`).focus();
-  await page.keyboard.press('Space');
-  // dnd-kit 키보드 센서는 시작 직후 다음 틱에 화살표 처리기를 붙인다
-  await page.waitForTimeout(150);
+  await keyboardPickUp(page, page.getByTestId(`board-card-${b.id}`));
   await page.keyboard.press('ArrowRight');
-  await page.waitForTimeout(100);
+  await expect(dndAnnouncer(page)).toContainText('진행 중 열 위');
   await page.keyboard.press('ArrowRight');
-  await page.waitForTimeout(150);
+  await expect(dndAnnouncer(page)).toContainText('막힘 열 위');
   await page.keyboard.press('Space');
   await expect.poll(() => status(b.id)).toBe('BLOCKED');
   await expect(page.getByTestId('board-col-BLOCKED').getByTestId(`board-card-${b.id}`)).toBeVisible();
   expect((await auditActions()).filter((x) => x === 'task.update')).toHaveLength(2);
+  // 대조: 정상 조작은 서버 요청을 만든다(VIEWER·보관 테스트의 0 과 비교)
+  expect(ok.count()).toBeGreaterThanOrEqual(2);
 
   // 새로고침해도 서버 값
   await page.reload();
@@ -44,7 +61,14 @@ test('작업 보드: 마우스로 열을 옮기면 상태가 DB·감사에 남�
   await expect(page).toHaveURL(/parents=1/);
   await expect(board).toContainText('상위 카드');
 
-  // 카드를 누르면(Enter) 작업 대화상자
+  // 카드에서 Enter 를 누르면 작업 대화상자(끌기는 Space 만)
+  await page.getByTestId(`board-card-${a.id}`).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog').getByLabel('제목')).toHaveValue('마우스 카드');
+  await expect(page.getByTestId(`board-card-${a.id}`)).not.toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  // 마우스로 누르기(움직임 없음)도 연다
   await page.getByTestId(`board-card-${a.id}`).click();
   await expect(page.getByRole('dialog').getByLabel('제목')).toHaveValue('마우스 카드');
 });
@@ -60,6 +84,7 @@ test('작업 보드 충돌: 다른 사람이 먼저 바꾼 카드를 끌면 사�
   await dragTo(page, page.getByTestId(`board-card-${t.id}`), page.getByTestId('board-col-DONE'));
   await expect(page.getByTestId('board-message')).toContainText('다른 사용자가 먼저 변경했습니다');
   await expect(page.getByTestId('board-col-IN_PROGRESS').getByTestId(`board-card-${t.id}`)).toBeVisible();
+  await expect(page.getByTestId('board-col-DONE').getByTestId(`board-card-${t.id}`)).toHaveCount(0);
   const row = await ownerDb.task.findUniqueOrThrow({ where: { id: t.id } });
   expect([row.status, row.version]).toEqual(['IN_PROGRESS', 1]);
   expect(await auditActions()).not.toContain('task.update');
@@ -95,14 +120,12 @@ test('VIEWER: 보드는 보이지만 끌어도 서버 요청 0·DB 불변, 이�
   const actions = watchActions(page);
 
   await gotoReady(page, '/projects/VBD/board');
-  await dragTo(page, page.getByTestId(`board-card-${t.id}`), page.getByTestId('board-col-DONE'));
-  await page.getByTestId(`board-card-${t.id}`).focus();
-  await page.keyboard.press('Space');
-  await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('Space');
+  await dragTo(page, page.getByTestId(`board-card-${t.id}`), page.getByTestId('board-col-DONE'), { expectDrag: false });
+  await keyboardPickUpDenied(page, page.getByTestId(`board-card-${t.id}`));
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await gotoReady(page, '/projects/VBD/board?kind=issue');
-  await dragTo(page, page.getByTestId(`board-card-${issue.id}`), page.getByTestId('board-col-CLOSED'));
+  await dragTo(page, page.getByTestId(`board-card-${issue.id}`), page.getByTestId('board-col-CLOSED'), { expectDrag: false });
+  await keyboardPickUpDenied(page, page.getByTestId(`board-card-${issue.id}`));
   await gotoReady(page, '/projects/VBD/list');
   await expect(page.getByRole('button', { name: '작업 추가' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /순서 옮기기/ })).toHaveCount(0);
@@ -113,4 +136,26 @@ test('VIEWER: 보드는 보이지만 끌어도 서버 요청 0·DB 불변, 이�
   expect(actions.count()).toBe(0);
   expect((await ownerDb.task.findUniqueOrThrow({ where: { id: t.id } })).status).toBe('TODO');
   expect((await ownerDb.issue.findUniqueOrThrow({ where: { id: issue.id } })).status).toBe('OPEN');
+});
+
+test('이슈 보드 충돌·삭제: 다른 사람이 바꾼 이슈는 사유를 보이고 최신 열로, 지워진 이슈는 다시 읽어 사라진다(T-2)', async ({ page, context }) => {
+  const m = await createUser('MEMBER');
+  const p = await createProject(m.id, { key: 'ICF' });
+  const changed = await createIssue(p.id, m.id, { title: '바뀐 이슈' });
+  const gone = await createIssue(p.id, m.id, { title: '지워질 이슈' });
+  await injectSession(context, m.id);
+
+  await gotoReady(page, '/projects/ICF/board?kind=issue');
+  await ownerDb.issue.update({ where: { id: changed.id }, data: { status: 'IN_PROGRESS', version: { increment: 1 } } });
+  await dragTo(page, page.getByTestId(`board-card-${changed.id}`), page.getByTestId('board-col-CLOSED'));
+  await expect(page.getByTestId('board-message')).toContainText('다른 사용자가 먼저 변경했습니다');
+  await expect(page.getByTestId('board-col-IN_PROGRESS').getByTestId(`board-card-${changed.id}`)).toBeVisible();
+  await expect(page.getByTestId('board-col-CLOSED').getByTestId(`board-card-${changed.id}`)).toHaveCount(0);
+  expect(await ownerDb.issue.findUniqueOrThrow({ where: { id: changed.id } })).toMatchObject({ status: 'IN_PROGRESS', version: 1 });
+
+  await ownerDb.issue.delete({ where: { id: gone.id } });
+  await dragTo(page, page.getByTestId(`board-card-${gone.id}`), page.getByTestId('board-col-RESOLVED'));
+  await expect(page.getByTestId('board-message')).toContainText('대상을 찾을 수 없습니다');
+  await expect(page.getByTestId(`board-card-${gone.id}`)).toHaveCount(0);
+  expect(await auditActions()).not.toContain('issue.update');
 });

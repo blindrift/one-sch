@@ -99,8 +99,10 @@ test('마크다운 XSS: script·onerror·iframe·javascript: 링크가 실행·�
     await expect(scope.locator('a[href="https://example.com/doc"]')).toHaveAttribute('target', '_blank');
     await expect(scope.locator('a[href="https://evil.example/x.png"]')).toHaveText('[그림]');
   }
+  const url = page.url();
   await panel.getByTestId('issue-description').getByText('누르기').click();
-  await page.waitForTimeout(300);
+  // 걸러진 링크는 글자(span)라 눌러도 이동·실행이 없다
+  expect(page.url()).toBe(url);
   expect(await page.evaluate(() => (window as unknown as { __xss?: number }).__xss)).toBeUndefined();
   expect(dialogs).toEqual([]);
   expect(csp).toEqual([]);
@@ -140,6 +142,11 @@ test('댓글 권한: VIEWER 는 이슈 수정 단추 없이 댓글 작성·본�
   await expect(panel.getByTestId(`comment-${myRow.id}`)).toContainText('(수정됨)');
   await panel.getByTestId(`comment-${myRow.id}`).getByRole('button', { name: '삭제' }).click();
   await expect(panel.getByTestId(`comment-${myRow.id}`)).toContainText('삭제된 댓글입니다.');
+  // 지운 댓글의 원문은 DOM 에도, 새로 읽은 페이지 응답에도 없다(T-8)
+  await expect(panel.getByTestId(`comment-${myRow.id}`)).not.toContainText('고친 의견');
+  const reloaded = await page.reload();
+  expect(await reloaded!.text()).not.toContain('조회자 고친 의견');
+  await expect(page.getByTestId(`comment-${myRow.id}`)).toContainText('삭제된 댓글입니다.');
   expect((await ownerDb.comment.findUniqueOrThrow({ where: { id: myRow.id } })).deletedAt).not.toBeNull();
 
   // ADMIN: 남의 댓글 삭제
@@ -196,4 +203,31 @@ test('전체 이슈 /issues: 프로젝트·유형 필터와 KEY-번호 검색이
   await expect(page).toHaveURL(/\/issues$/);
   await page.getByLabel('프로젝트 필터').selectOption('OLD');
   await expect(list).toContainText('보관 이슈');
+});
+
+test('없는 ?issue= 는 안내 패널, 상세의 연결 작업 링크는 목록에서 그 작업을 강조한다(F5·F6)', async ({ page, context }) => {
+  const m = await createUser('MEMBER');
+  const p = await createProject(m.id, { key: 'LNK' });
+  const other = await createProject(m.id, { key: 'OTR' });
+  const tasks = [];
+  for (let i = 0; i < 55; i += 1) tasks.push(await createTask(p.id, { title: `작업 ${String(i).padStart(2, '0')}`, start: '2026-11-10', end: '2026-11-12' }));
+  const target = tasks[53];
+  const issue = await createIssue(p.id, m.id, { title: '링크 이슈' });
+  await ownerDb.issue.update({ where: { id: issue.id }, data: { taskId: target.id } });
+  await createIssue(other.id, m.id, { title: '다른 프로젝트 이슈' });
+  await injectSession(context, m.id);
+
+  for (const key of ['LNK-9', 'OTR-1', 'nope']) {
+    await gotoReady(page, `/projects/LNK/issues?issue=${key}`);
+    await expect(page.getByTestId('issue-panel-missing')).toContainText('이슈를 찾을 수 없습니다');
+    await expect(page.getByTestId('issue-panel')).toHaveCount(0);
+  }
+
+  await gotoReady(page, '/projects/LNK/issues?issue=LNK-1');
+  await page.getByTestId('issue-task-link').click();
+  await expect(page).toHaveURL(new RegExp(`/projects/LNK/list\\?task=${target.id}$`));
+  const row = page.getByTestId(`task-row-${target.id}`);
+  await expect(row).toHaveAttribute('aria-current', 'true');
+  await expect(row).toBeInViewport();
+  await expect(page.getByRole('navigation', { name: '페이지' })).toContainText('2 / 2쪽');
 });

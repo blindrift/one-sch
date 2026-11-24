@@ -237,8 +237,11 @@ export async function createIssue(
   });
 }
 
-/** 마우스로 요소를 다른 요소 위로 끈다(dnd-kit: 몇 px 움직여 끌기를 시작한 뒤 여러 단계로 옮긴다) */
-export async function dragTo(page: Page, from: Locator, to: Locator, opts: { toY?: 'top' | 'center' } = {}) {
+/**
+ * 마우스로 요소를 다른 요소 위로 끈다(dnd-kit: 몇 px 움직여 끌기를 시작한 뒤 여러 단계로 옮긴다).
+ * expectDrag(기본 true)면 놓기 전에 끌기 상태(data-dragging)가 될 때까지 기다린다. 끌 수 없는 경우(VIEWER·보관)는 false.
+ */
+export async function dragTo(page: Page, from: Locator, to: Locator, opts: { toY?: 'top' | 'center'; expectDrag?: boolean } = {}) {
   const a = await from.boundingBox();
   const b = await to.boundingBox();
   if (!a || !b) throw new Error('끌 대상이 보이지 않습니다.');
@@ -250,6 +253,34 @@ export async function dragTo(page: Page, from: Locator, to: Locator, opts: { toY
   await page.mouse.down();
   await page.mouse.move(x0 + 8, y0 + 8, { steps: 2 });
   for (let i = 1; i <= 10; i += 1) await page.mouse.move(x0 + ((x1 - x0) * i) / 10, y0 + ((y1 - y0) * i) / 10, { steps: 2 });
-  await page.waitForTimeout(100);
+  if (opts.expectDrag !== false) await page.locator('[data-dragging]').first().waitFor();
   await page.mouse.up();
+}
+
+/** dnd-kit 화면 낭독 영역(끌기 중 안내 문구) */
+export function dndAnnouncer(page: Page): Locator {
+  return page.locator('[id^="DndLiveRegion-"]');
+}
+
+/**
+ * 키보드로 끌기를 시작한다(Space). 끌기 상태(aria-pressed)가 되고, dnd-kit 키보드 센서가 setTimeout(0) 으로
+ * 화살표 처리기를 붙일 때까지 한 틱 기다린다(고정 대기 아님).
+ */
+export async function keyboardPickUp(page: Page, target: Locator) {
+  await target.focus();
+  await page.keyboard.press('Space');
+  await expect(target).toHaveAttribute('aria-pressed', 'true');
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+}
+
+/** 끌 수 없는 요소에 키보드 끌기를 시도하고 끌기 상태가 되지 않았음을 확인한다(MEMBER 와 같은 절차·대기) */
+export async function keyboardPickUpDenied(page: Page, target: Locator) {
+  await target.focus();
+  await page.keyboard.press('Space');
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  await expect(target).not.toHaveAttribute('aria-roledescription', /.+/);
+  await expect(target).not.toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Space');
+  await expect(target).not.toHaveAttribute('aria-pressed', 'true');
 }

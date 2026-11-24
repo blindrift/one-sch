@@ -22,9 +22,12 @@ describe('Markdown(서버 렌더)', () => {
     ['iframe', '<iframe src="https://evil.example"></iframe>'],
     ['인라인 HTML 안 이벤트', '안녕 <b onclick="alert(1)">x</b>'],
     ['svg onload', '<svg onload="alert(1)"></svg>'],
-  ])('raw HTML(%s)은 출력하지 않는다', (_label, md) => {
-    const out = html(md);
+  ])('raw HTML(%s)은 출력하지 않는다(앞뒤 글은 남는다)', (_label, md) => {
+    const out = html(`앞 문장\n\n${md}\n\n뒤 문장`);
     expect(out).not.toMatch(/<script|<iframe|<svg|<b |onerror|onclick|onload|<img/i);
+    // 대조: 렌더가 통째로 비어서 통과한 것이 아님
+    expect(out).toContain('<p>앞 문장</p>');
+    expect(out).toContain('<p>뒤 문장</p>');
   });
 
   it.each([
@@ -38,8 +41,16 @@ describe('Markdown(서버 렌더)', () => {
     '[x](vbscript:msgbox(1))',
     '<javascript:alert(1)>',
     '[x][r]\n\n[r]: javascript:alert(1)',
+    '[x](&#x6A;avascript:alert(1))',
+    '[x](&#X6a;avascript&#x3A;alert(1))',
+    '[x](javascript:alert(1) "제목")',
+    "[x](<javascript:alert(1)> 'title')",
+    '[x](https://bank.example@evil.example/)',
   ])('위험한 링크 %j 는 href 없이 글자만', (md) => {
-    const out = html(md);
+    const out = html(`보기 ${md} 끝`);
+    // 대조: 주변 글과 링크 글자는 남는다
+    expect(out).toContain('보기 ');
+    expect(out).toContain(' 끝');
     // 링크 요소·주소 속성이 없다(링크 글자 자체는 남을 수 있다: 자동 링크 <javascript:…> 는 글자가 곧 주소)
     expect(out).not.toMatch(/<a\b|href=|src=/i);
   });

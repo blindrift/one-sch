@@ -353,7 +353,9 @@ function Card({ id, label, disabled, onOpen, children }: { id: string; label: st
       {...attributes}
       {...listeners}
       aria-label={label}
-      aria-disabled={disabled ? undefined : attributes['aria-disabled']}
+      // 끌 수 없으면(VIEWER·보관) '끌 수 있는 항목' 표시를 빼고, 열기는 되므로 aria-disabled 도 두지 않는다
+      aria-roledescription={disabled ? undefined : attributes['aria-roledescription']}
+      aria-disabled={undefined}
       tabIndex={0}
       data-testid={`board-card-${id}`}
       data-dragging={isDragging || undefined}
