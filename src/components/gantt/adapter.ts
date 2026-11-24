@@ -132,7 +132,7 @@ export function projectToRow(p: ProjectDto, topLevel: readonly TaskDto[], open =
   };
 }
 
-/** 프로젝트 순서대로, 각 프로젝트 안에서는 sortOrder 순으로(부모가 자식보다 먼저 오게) 행을 만든다. */
+/** 프로젝트 순서대로, 각 프로젝트 안에서는 (sortOrder, id) 순으로(부모가 자식보다 먼저 오게) 행을 만든다. 목록 탭(lib/task-list)과 같은 순서. */
 export function toGanttRows({ projects, tasks, users, today, closed }: AdapterInput): GanttRow[] {
   const userNames = new Map(users.map((u) => [u.id, u.name]));
   const byProject = new Map<string, TaskDto[]>();
@@ -143,7 +143,7 @@ export function toGanttRows({ projects, tasks, users, today, closed }: AdapterIn
   }
   const rows: GanttRow[] = [];
   for (const p of projects) {
-    const list = [...(byProject.get(p.id) ?? [])].sort((a, b) => a.sortOrder - b.sortOrder);
+    const list = [...(byProject.get(p.id) ?? [])].sort((a, b) => a.sortOrder - b.sortOrder || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     const ids = new Set(list.map((t) => t.id));
     // 상위가 목록에 없으면(필터로 빠짐) 프로젝트 바로 밑에 둔다.
     const normalized = list.map((t) => (t.parentId && !ids.has(t.parentId) ? { ...t, parentId: null } : t));

@@ -590,6 +590,118 @@ describe('정적 권한 검사', () => {
   });
 });
 
+/** 마크다운(이슈 설명·댓글) 렌더 규칙(설계서 5.2, D23): raw HTML 을 DOM 에 넣는 길을 저장소 전체에서 막는다. */
+describe('마크다운·HTML 주입 정적 검사', () => {
+  /** JSX 속성·객체 키로 쓰인 dangerouslySetInnerHTML 위치(주석·문자열은 무시) */
+  function innerHtmlUses(sf: ts.SourceFile): string[] {
+    const found: string[] = [];
+    const visit = (node: ts.Node) => {
+      const name =
+        ts.isJsxAttribute(node) || ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node) || ts.isPropertyAccessExpression(node)
+          ? node.name.getText(sf)
+          : ts.isElementAccessExpression(node) && ts.isStringLiteral(node.argumentExpression)
+            ? node.argumentExpression.text
+            : null;
+      if (name === 'dangerouslySetInnerHTML' || name === 'innerHTML' || name === 'outerHTML') {
+        found.push(`${sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1}행 ${name}`);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    return found;
+  }
+
+  it('src 어디에서도 dangerouslySetInnerHTML·innerHTML·outerHTML 을 쓰지 않는다', () => {
+    const problems = srcFiles.flatMap((f) => innerHtmlUses(parse(f)).map((p) => `${rel(f)}: ${p}`));
+    expect(problems).toEqual([]);
+  });
+
+  const BANNED_HTML_MODULES = /^(rehype-raw|rehype-dom-raw|remark-html|marked|markdown-it|html-react-parser)(\/|$)/;
+  const MD = 'src/components/markdown.tsx';
+
+  /** raw HTML 플러그인 import(정적·동적 모두) */
+  function bannedImports(sf: ts.SourceFile, file: string): string[] {
+    return collectImports(sf, file)
+      .filter((i) => BANNED_HTML_MODULES.test(i.module))
+      .map((i) => i.module);
+  }
+
+  /** `import 'server-only';`(부수 효과 import, 별칭·타입 import·주석은 인정하지 않음)가 있는지 */
+  function importsServerOnly(sf: ts.SourceFile, file: string): boolean {
+    return collectImports(sf, file).some((i) => i.module === 'server-only' && i.kind === 'side-effect');
+  }
+
+  /** react-markdown·remark-gfm 은 markdown.tsx 에서만, 'use client' 파일은 markdown.tsx 를 import 하지 않는다 */
+  function markdownBoundaryProblems(relPath: string, sf: ts.SourceFile, file: string): string[] {
+    const problems: string[] = [];
+    const imps = collectImports(sf, file);
+    if (relPath !== MD && imps.some((i) => /^(react-markdown|remark-gfm)(\/|$)/.test(i.module))) problems.push('react-markdown 직접 사용');
+    if (directives(sf.statements).includes('use client') && imps.some((i) => (i.file ? rel(i.file) : i.module) === MD || i.module === MD.replace(CODE_EXT, ''))) {
+      problems.push('클라이언트 파일이 markdown 을 import');
+    }
+    return problems;
+  }
+
+  it('rehype-raw(마크다운 안 HTML 허용) 같은 raw HTML 플러그인을 import 하지 않는다', () => {
+    const problems = repoFiles.flatMap((f) => bannedImports(parse(f), f).map((m) => `${rel(f)}: ${m}`));
+    expect(problems).toEqual([]);
+  });
+
+  it("react-markdown 은 components/markdown.tsx 에서만 쓰고, 그 파일은 'server-only' 이며 'use client' 파일이 import 하지 않는다", () => {
+    const problems = srcFiles.flatMap((f) => markdownBoundaryProblems(rel(f), parse(f), f).map((p) => `${rel(f)}: ${p}`));
+    if (!importsServerOnly(parse(join(ROOT, MD)), join(ROOT, MD))) problems.push(`${MD}: import 'server-only' 없음`);
+    expect(problems).toEqual([]);
+  });
+
+  describe('음성 검증(T-3)', () => {
+    // 가짜 파일은 src/components 아래에 있는 것처럼 둔다(@/ 와 상대 경로를 실제 파일로 풀 수 있게)
+    const fake = join(SRC, 'components', 'fake.tsx');
+    const sfOf = (code: string) => ts.createSourceFile(fake, code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+
+    it.each([
+      ['createElement props', "createElement('div', { dangerouslySetInnerHTML: { __html: x } });"],
+      ['단축 속성', 'const p = { dangerouslySetInnerHTML }; h(p);'],
+      ['대괄호 innerHTML', "el['innerHTML'] = s;"],
+      ['outerHTML', 'el.outerHTML = s;'],
+    ])('%s 를 잡는다', (_label, code) => {
+      expect(innerHtmlUses(sfOf(code)).length).toBeGreaterThan(0);
+    });
+
+    it('raw HTML 플러그인의 정적·동적 import·하위 경로를 잡는다', () => {
+      expect(bannedImports(sfOf("import rehypeRaw from 'rehype-raw';"), fake)).toEqual(['rehype-raw']);
+      expect(bannedImports(sfOf("const m = await import('rehype-raw');"), fake)).toEqual(['rehype-raw']);
+      expect(bannedImports(sfOf("import x from 'markdown-it/lib/x';"), fake)).toEqual(['markdown-it/lib/x']);
+      expect(bannedImports(sfOf("import x from 'rehype-sanitize';"), fake)).toEqual([]);
+    });
+
+    it("'server-only' 규칙: 부수 효과 import 만 인정하고 주석·이름 import·동적 import·빠짐은 잡는다(T-14)", () => {
+      expect(importsServerOnly(sfOf("import 'server-only';\nexport const x = 1;"), fake)).toBe(true);
+      expect(importsServerOnly(sfOf("// import 'server-only';\nexport const x = 1;"), fake)).toBe(false);
+      expect(importsServerOnly(sfOf("import x from 'server-only';\nvoid x;"), fake)).toBe(false);
+      expect(importsServerOnly(sfOf("void import('server-only');"), fake)).toBe(false);
+      expect(importsServerOnly(sfOf("const s = 'server-only';"), fake)).toBe(false);
+      expect(importsServerOnly(sfOf('export const x = 1;'), fake)).toBe(false);
+    });
+
+    it("markdown.tsx 밖의 react-markdown, 'use client' 파일의 markdown import 를 잡는다", () => {
+      expect(markdownBoundaryProblems('src/components/fake.tsx', sfOf("import Md from 'react-markdown';"), fake)).toEqual(['react-markdown 직접 사용']);
+      expect(markdownBoundaryProblems('src/components/fake.tsx', sfOf("'use client';\nimport { Markdown } from '@/components/markdown';"), fake)).toEqual([
+        '클라이언트 파일이 markdown 을 import',
+      ]);
+      expect(markdownBoundaryProblems('src/components/fake.tsx', sfOf("'use client';\nimport { Markdown } from './markdown';"), fake)).toEqual([
+        '클라이언트 파일이 markdown 을 import',
+      ]);
+      expect(markdownBoundaryProblems('src/components/fake.tsx', sfOf("import { Markdown } from '@/components/markdown';"), fake)).toEqual([]);
+      expect(markdownBoundaryProblems(MD, sfOf("import Md from 'react-markdown';"), fake)).toEqual([]);
+    });
+  });
+
+  it('음성 검증: dangerouslySetInnerHTML 사용을 잡는다', () => {
+    const sf = ts.createSourceFile('x.tsx', 'export const A = () => <div dangerouslySetInnerHTML={{ __html: x }} />; el.innerHTML = s;', ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    expect(innerHtmlUses(sf)).toHaveLength(2);
+  });
+});
+
 /** 위 검사 함수들이 우회 코드를 실제로 잡는지(음성 검증) */
 describe('정적 검사 자체의 음성 검증', () => {
   const src = (code: string) => ts.createSourceFile('x.tsx', code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);

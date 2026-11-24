@@ -52,3 +52,6 @@ export type TimelineData = {
 /** 작업 쓰기 결과: 갱신된 작업과 재계산된 조상(가까운 순) */
 export type TaskWriteResult = { task: TaskDto; ancestors: TaskDto[] };
 export type TaskDeleteResult = { deletedIds: string[]; ancestors: TaskDto[] };
+
+/** 형제 순서 바꾸기 결과: 옮긴 작업과 sortOrder 가 바뀐 형제(새 값) */
+export type TaskReorderResult = { task: TaskDto; siblings: Array<{ id: string; sortOrder: number }> };

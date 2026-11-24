@@ -98,24 +98,36 @@ export function PageTitle({ icon, children }: { icon?: React.ReactNode; children
   );
 }
 
-/** ClickUp 식 밑줄 보기 탭(현재 2단계는 간트 하나). */
-export function ViewTabs({ tabs, label }: { tabs: { label: string; icon?: React.ReactNode; active: boolean }[]; label: string }) {
+/** ClickUp 식 밑줄 보기 탭. href 가 있으면 링크(현재 탭은 aria-current=page), 없으면 글자만. */
+export function ViewTabs({
+  tabs,
+  label,
+}: {
+  tabs: { label: string; icon?: React.ReactNode; active: boolean; href?: string; testId?: string }[];
+  label: string;
+}) {
   return (
     <nav aria-label={label} className="flex h-10 shrink-0 items-stretch gap-5 border-b border-line px-4">
-      {tabs.map((t) => (
-        <span
-          key={t.label}
-          aria-current={t.active ? 'page' : undefined}
-          className={
-            t.active
-              ? 'relative flex items-center gap-1.5 text-[13px] font-medium text-foreground after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:rounded-full after:bg-brand'
-              : 'flex items-center gap-1.5 text-[13px] text-text-subtle'
-          }
-        >
-          {t.icon}
-          {t.label}
-        </span>
-      ))}
+      {tabs.map((t) => {
+        const className = t.active
+          ? 'relative flex items-center gap-1.5 text-[13px] font-medium text-foreground after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:rounded-full after:bg-brand'
+          : 'flex items-center gap-1.5 text-[13px] text-text-subtle transition-colors hover:text-foreground';
+        const body = (
+          <>
+            {t.icon}
+            {t.label}
+          </>
+        );
+        return t.href ? (
+          <Link key={t.label} href={t.href} aria-current={t.active ? 'page' : undefined} className={className} data-testid={t.testId}>
+            {body}
+          </Link>
+        ) : (
+          <span key={t.label} aria-current={t.active ? 'page' : undefined} className={className}>
+            {body}
+          </span>
+        );
+      })}
     </nav>
   );
 }

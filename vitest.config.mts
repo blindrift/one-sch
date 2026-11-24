@@ -4,6 +4,8 @@ import { defineConfig } from 'vitest/config';
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({
+  // tsconfig 의 jsx: preserve(Next 가 변환)와 달리 테스트에서는 .tsx 컴포넌트(마크다운 렌더 등)를 직접 변환한다.
+  oxc: { jsx: { runtime: 'automatic' } },
   resolve: {
     alias: {
       '@': r('./src'),

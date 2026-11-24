@@ -104,3 +104,37 @@ describe('0002(2단계 일정)', () => {
     );
   });
 });
+
+describe('0005(3단계 이슈·댓글 CHECK)', () => {
+  async function issueBase() {
+    const o = await appDb.user.create({ data: { email: 'o@example.com', name: 'o' } });
+    const p = await appDb.project.create({ data: { key: 'IS', name: 'p', color: '#112233', ownerId: o.id } });
+    return { o, p };
+  }
+
+  it('Issue 제목 1–200자, 설명 20,000자 이하', async () => {
+    const { o, p } = await issueBase();
+    const base = { projectId: p.id, reporterId: o.id };
+    await expect(appDb.issue.create({ data: { ...base, number: 1, title: '' } })).rejects.toThrow(/Issue_title_length_check/);
+    await expect(appDb.issue.create({ data: { ...base, number: 1, title: 'x'.repeat(201) } })).rejects.toThrow(/Issue_title_length_check/);
+    await expect(appDb.issue.create({ data: { ...base, number: 1, title: 't', description: 'd'.repeat(20_001) } })).rejects.toThrow(
+      /Issue_description_length_check/,
+    );
+    const ok = await appDb.issue.create({ data: { ...base, number: 1, title: 'x'.repeat(200), description: 'd'.repeat(20_000) } });
+    expect(ok.description).toHaveLength(20_000);
+    // 설명은 비워 둘 수 있다(기본값 '')
+    await appDb.issue.create({ data: { ...base, number: 2, title: 't' } });
+  });
+
+  it('Comment 본문 1–20,000자, 앱 역할은 Issue·Comment DML 가능', async () => {
+    const { o, p } = await issueBase();
+    const issue = await appDb.issue.create({ data: { projectId: p.id, reporterId: o.id, number: 1, title: 't' } });
+    const base = { issueId: issue.id, authorId: o.id };
+    await expect(appDb.comment.create({ data: { ...base, body: '' } })).rejects.toThrow(/Comment_body_length_check/);
+    await expect(appDb.comment.create({ data: { ...base, body: 'b'.repeat(20_001) } })).rejects.toThrow(/Comment_body_length_check/);
+    const c = await appDb.comment.create({ data: { ...base, body: 'b'.repeat(20_000) } });
+    await appDb.comment.update({ where: { id: c.id }, data: { deletedAt: new Date() } });
+    await appDb.issue.delete({ where: { id: issue.id } });
+    expect(await appDb.comment.count()).toBe(0);
+  });
+});

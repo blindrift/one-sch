@@ -31,9 +31,18 @@ export const ACTION_POLICY: Record<string, Policy> = {
   'task.createTask': { min: 'MEMBER' },
   'task.updateTask': { min: 'MEMBER' },
   'task.deleteTask': { min: 'MEMBER' },
+  'task.reorderTask': { min: 'MEMBER' },
 
   'dependency.addDependency': { min: 'MEMBER' },
   'dependency.removeDependency': { min: 'MEMBER' },
+
+  'issue.createIssue': { min: 'MEMBER' },
+  'issue.updateIssue': { min: 'MEMBER' },
+  'issue.deleteIssue': { min: 'MEMBER' },
+
+  'comment.addComment': { min: 'VIEWER' },
+  'comment.updateComment': { min: 'VIEWER' },
+  'comment.deleteComment': { min: 'VIEWER' },
 };
 
 export const PUBLIC_ACTIONS = Object.entries(ACTION_POLICY)

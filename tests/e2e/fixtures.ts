@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { expect, test as base, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { expect, test as base, type BrowserContext, type Locator, type Page, type Request } from '@playwright/test';
 import type { Role } from '@prisma/client';
 import { seed } from '../../prisma/seed';
 import { ownerDb, resetDb } from '../helpers/db';
@@ -182,4 +182,117 @@ export async function dragBar(page: Page, target: Locator, dx: number, at: 'move
   await page.mouse.down();
   for (let i = 1; i <= 12; i += 1) await page.mouse.move(x + (dx * i) / 12, y, { steps: 2 });
   await page.mouse.up();
+}
+
+// ---- 이슈·보기(3단계) ----
+
+/**
+ * Server Action 호출(POST + next-action 헤더)을 센다. 거부된 조작이 서버 쓰기 요청을 아예 만들지 않았는지 확인한다.
+ * settle(): 늦게 나가는 요청도 잡도록 최대 ms 동안 액션 요청을 기다린다(오면 즉시 끝나고 count 로 실패가 드러난다).
+ */
+export function watchActions(page: Page) {
+  const isAction = (req: Request) => req.method() === 'POST' && req.headers()['next-action'] !== undefined;
+  const seen: string[] = [];
+  page.on('request', (req) => {
+    if (isAction(req)) seen.push(req.url());
+  });
+  return {
+    count: () => seen.length,
+    settle: (ms = 1_000) =>
+      page.waitForRequest(isAction, { timeout: ms }).then(
+        () => undefined,
+        () => undefined,
+      ),
+  };
+}
+
+/** DB 에 이슈를 바로 만든다(번호는 프로젝트 issueSeq 와 맞춘다) */
+export async function createIssue(
+  projectId: string,
+  reporterId: string,
+  data: {
+    title: string;
+    description?: string;
+    status?: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+    type?: 'ISSUE' | 'RISK' | 'REQUEST';
+    priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+    assigneeId?: string;
+    dueDate?: string;
+  },
+) {
+  const p = await ownerDb.project.update({ where: { id: projectId }, data: { issueSeq: { increment: 1 } }, select: { issueSeq: true } });
+  return ownerDb.issue.create({
+    data: {
+      projectId,
+      reporterId,
+      number: p.issueSeq,
+      title: data.title,
+      description: data.description ?? '',
+      status: data.status ?? 'OPEN',
+      type: data.type ?? 'ISSUE',
+      priority: data.priority ?? 'MEDIUM',
+      assigneeId: data.assigneeId ?? null,
+      dueDate: data.dueDate ? day(data.dueDate) : null,
+    },
+  });
+}
+
+/**
+ * 마우스로 요소를 다른 요소 위로 끈다(dnd-kit: 몇 px 움직여 끌기를 시작한 뒤 여러 단계로 옮긴다).
+ * expectDrag(기본 true)면 놓기 전에 끌기 상태(data-dragging)가 될 때까지 기다린다. 끌 수 없는 경우(VIEWER·보관)는 false.
+ */
+export async function dragTo(page: Page, from: Locator, to: Locator, opts: { toY?: 'top' | 'center'; expectDrag?: boolean } = {}) {
+  // 직전 끌기의 되돌림 애니메이션(transform transition)이 끝나 자리가 멈출 때까지 기다린 뒤 좌표를 잰다(hover 는 안정 상태를 기다린다)
+  await from.hover();
+  const a = await from.boundingBox();
+  const b = await to.boundingBox();
+  if (!a || !b) throw new Error('끌 대상이 보이지 않습니다.');
+  const x0 = a.x + a.width / 2;
+  const y0 = a.y + a.height / 2;
+  const x1 = b.x + b.width / 2;
+  const y1 = opts.toY === 'top' ? b.y + 4 : b.y + b.height / 2;
+  await page.mouse.move(x0, y0);
+  await page.mouse.down();
+  await page.mouse.move(x0 + 8, y0 + 8, { steps: 2 });
+  for (let i = 1; i <= 10; i += 1) await page.mouse.move(x0 + ((x1 - x0) * i) / 10, y0 + ((y1 - y0) * i) / 10, { steps: 2 });
+  if (opts.expectDrag !== false) {
+    // 끌기가 시작됐고, dnd-kit 이 목표(열·행) 위라고 판정한 뒤에 놓는다(T-16: 목표의 data-over)
+    await page.locator('[data-dragging]').first().waitFor();
+    await expect(to).toHaveAttribute('data-over', 'true');
+  }
+  await page.mouse.up();
+}
+
+/** dnd-kit 화면 낭독 영역(끌기 중 안내 문구) */
+export function dndAnnouncer(page: Page): Locator {
+  return page.locator('[id^="DndLiveRegion-"]');
+}
+
+/**
+ * 키보드로 끌기를 시작한다(Space). 끌기 상태(aria-pressed)가 되고, dnd-kit 키보드 센서가 setTimeout(0) 으로
+ * 화살표 처리기를 붙일 때까지 한 틱 기다린다(고정 대기 아님).
+ */
+export async function keyboardPickUp(page: Page, target: Locator) {
+  await target.focus();
+  await page.keyboard.press('Space');
+  await expect(target).toHaveAttribute('aria-pressed', 'true');
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+}
+
+/**
+ * 끌 수 없는 요소에 키보드 끌기를 시도하고 끌기 상태가 되지 않았음을 확인한다(MEMBER 와 같은 절차·대기).
+ * 핵심 단언: Space 뒤 (1) 낭독 영역에 집기 문구("…를 들었습니다")가 없고 (2) aria-pressed 가 true 가 아니며
+ * (3) '끌 수 있는 항목' 표시(aria-roledescription)가 없다. DB·서버 요청 불변은 호출한 테스트가 따로 확인한다.
+ */
+export async function keyboardPickUpDenied(page: Page, target: Locator) {
+  await target.focus();
+  await page.keyboard.press('Space');
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  // 대조: MEMBER 는 같은 시점에 집기 문구가 낭독 영역에 나온다(keyboardPickUp 뒤 board.spec 의 문구 대기)
+  await expect(dndAnnouncer(page)).not.toContainText('들었습니다');
+  await expect(target).not.toHaveAttribute('aria-roledescription', /.+/);
+  await expect(target).not.toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Space');
+  await expect(target).not.toHaveAttribute('aria-pressed', 'true');
 }
