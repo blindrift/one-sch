@@ -8,6 +8,11 @@ export const PROJECT_NAME_MAX = 100;
 /** 작업의 관련 링크·메모 길이 한도(0003 마이그레이션의 CHECK 와 같은 값) */
 export const TASK_URL_MAX = 2000;
 export const TASK_MEMO_MAX = 5000;
+/** 이슈 설명·댓글 본문 길이 한도(0005 마이그레이션의 CHECK 와 같은 값, 설계서 9.3) */
+export const ISSUE_DESC_MAX = 20000;
+export const COMMENT_MAX = 20000;
+/** 목록 검색어 길이 한도 */
+export const SEARCH_MAX = 100;
 export const PROJECT_KEY_RE = /^[A-Z][A-Z0-9]{1,9}$/;
 export const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 /**
