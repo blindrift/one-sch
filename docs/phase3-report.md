@@ -110,6 +110,7 @@
 - **작업 목록은 프로젝트 작업 전체를 읽는다.** 수천 건 단일 프로젝트가 되면 DB 쪽 계산으로 바꾼다.
 - **비활성 담당자 이름은 목록·보드에서 빈칸**(D8·L-5 와 같음). 이슈 목록·상세는 관계로 이름을 읽어 보인다.
 - **dnd-kit 의 라이브 영역·끄는 중 transform 은 인라인 style** — `style-src 'unsafe-inline'` 은 1단계부터 유지 중이라 새 완화 없음.
+- **감사 로그에 설명·댓글 본문이 전문으로 남는다(리뷰 S-2).** 지운 댓글 본문도 DB 행·감사에 남고 화면으로만 숨긴다. ADMIN purge 는 다음 단계 후보(설계서 5.2·8.1).
 - **`/issues` 의 이슈 상세는 범위 제한 없이 KEY 로 연다**(보관 프로젝트 이슈도 읽기 전용으로 열림). VIEWER 이상이 모든 프로젝트를 읽을 수 있으므로 권한 문제는 아니다.
 
 ## 7. 확인이 필요한 것
@@ -119,6 +120,32 @@
 ## 8. 리뷰
 
 (리더가 채운다)
+
+### 8.1 1회차 수정(developer)
+
+| 항목 | 처리 |
+|---|---|
+| F1 = L-1 | 이슈 보드 성공 시 `router.refresh()` 제거(응답 값만 반영, 열린 상세 패널이 그 이슈일 때만 다시 읽기). CONFLICT·NOT_FOUND 만 refresh. 작업·이슈 보드 모두 저장 중(pending>0)에 온 서버 값으로 낙관 상태를 덮어쓰지 않음 |
+| F2 = L-2 | 간트 행 정렬 `(sortOrder, id)`, `loadTimeline` orderBy 에 id 추가 |
+| F3 = L-5 | 목록 재정렬 저장 중 끌기 잠금(손잡이는 남김), 자기 하위 위에 놓으면 "자기 하위 작업 위치로는 옮길 수 없습니다" |
+| F4 = L-6 | 이슈 대화상자 작업 후보를 `treeOrder`(간트 순서)로(`treeOrder` 를 제네릭으로) |
+| F5 = L-7 | `?issue=` 가 없거나 다른 프로젝트·잘못된 키면 "이슈를 찾을 수 없습니다" 패널(이슈 탭·`/issues`·이슈 보드) |
+| F6 = L-3 | 연결 작업 링크를 `/projects/KEY/list?task=<id>` 로: 그 작업이 있는 페이지를 열고 행 강조(`aria-current`, 화면 가운데로 스크롤). `task` 는 정렬·페이지 링크·필터 변경에 싣지 않음 |
+| F7 = S-3 | `safeMarkdownUrl` 이 username·password 든 URL 을 거부 |
+| F8 = S-1·S-4 | 상세 댓글 최근 200건(생략 건수 안내), 이슈당 댓글 1,000개 상한(VALIDATION `comment_limit`), 이슈 보드 최근 1,000건 상한(안내) |
+| L-4 | 수용 대신 반영: `task.delete` 감사 before 에 `unlinkedIssues` |
+| S-2 | 수용: 설계서 5.2·8.1, 위 6절 |
+| S-5 | 수용: 통합 테스트로 확인됨(`%` 검색 대조 제목 포함) |
+| T-1 | VIEWER·보관 키보드 음성 검사를 `keyboardPickUpDenied`(MEMBER 와 같은 절차, `aria-roledescription`·`aria-pressed` 부재 단언)로. 끌 수 없는 카드는 `aria-roledescription` 을 빼도록 화면도 바꿈 |
+| T-2 | 이슈 보드 충돌·NOT_FOUND(카드 삭제 후 끌기) E2E, 충돌 시 대상 열 `toHaveCount(0)` |
+| T-3 | 정적 검사 음성 검증(createElement props·단축 속성·`el['innerHTML']`·outerHTML, rehype-raw 정적·동적·하위 경로 import, markdown.tsx 밖 react-markdown, 'use client' 의 markdown import 별칭·상대 경로) |
+| T-4 | 고정 대기 제거: 키보드 끌기는 `aria-pressed` + 한 틱(`setTimeout 0`), 이동은 dnd-kit 낭독 문구 대기, 마우스 끌기는 `data-dragging` 대기, issues.spec 300ms 제거 |
+| T-5 | 마크다운 부정 단언에 앞뒤 글 존재 대조, `&#x6A;avascript:`·대문자 엔티티·제목 붙은 링크·`<…>` 꺾쇠 링크·자격 정보 URL 추가 |
+| T-6 | 이슈·작업 목록 페이지 경계 정확히 50·51건, 작업 `%` 검색 대조 제목 |
+| T-7 | 재정렬 통합: 하위가 따라감, 형제 값 집합 유지, 같은 version 동시 2회(OK 1·CONFLICT 1), NOT_FOUND, 겹친 sortOrder |
+| T-8 | 댓글 삭제 후 원문이 DOM·새로고침 응답 HTML 에 없음 |
+| T-9 | MEMBER 정상 조작(보드·재정렬)에서 next-action POST ≥ 2 대조 |
+| T-10 | 보드 카드 Enter 로 열기 E2E(끌기 상태가 되지 않음) + 마우스 누르기 |
 
 ## 9. 실행 방법 메모
 

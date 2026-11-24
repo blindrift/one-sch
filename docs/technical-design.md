@@ -264,16 +264,19 @@ erDiagram
 
 - 번호(`number`)는 프로젝트별 일련번호다. 이슈를 만들 때 프로젝트 잠금(advisory xact lock) 안에서 `Project.issueSeq` 를 1 올려 그 값을 쓴다(빈 번호 재사용 없음, 이슈를 지워도 번호는 돌아오지 않음). 이 증가는 프로젝트 편집이 아니므로 `Project.version` 은 올리지 않는다(D22). `(projectId, number)` unique.
 - 화면 표기는 `KEY-번호`(예: `ERP-12`). 상세 패널 URL 은 `?issue=ERP-12`, 검색창에 `ERP-12` 를 넣으면 번호로 찾는다.
-- 제목 1–200자, 설명 20,000자 이하(0005 CHECK). 담당자는 활성 사용자만(D8), 보고자는 만든 사람. 연결 작업(`taskId`)은 같은 프로젝트의 작업만(다른 프로젝트 id 는 VALIDATION). 연결된 작업을 지우면 `taskId` 는 NULL(FK SetNull).
+- 제목 1–200자, 설명 20,000자 이하(0005 CHECK). 담당자는 활성 사용자만(D8), 보고자는 만든 사람. 연결 작업(`taskId`)은 같은 프로젝트의 작업만(다른 프로젝트 id 는 VALIDATION). 연결된 작업을 지우면 `taskId` 는 NULL(FK SetNull). 이 해제는 이슈의 감사·version 에 남지 않으므로 작업 삭제 감사(`task.delete` before.`unlinkedIssues`)에 이슈 id 를 남긴다.
 - 보관된 프로젝트의 이슈·댓글은 읽기 전용이다: 이슈 생성·수정·삭제·보드 이동·댓글 작성·수정·삭제 모두 CONFLICT `archived`(D18, D6 확장).
 - 이슈 삭제는 MEMBER 이상이 실제 삭제한다. 댓글은 DB cascade 로 함께 지워지고, 감사 `issue.delete` before 에 이슈 스냅샷과 댓글 수를 남긴다(D21).
 - 쓰기는 `version` 낙관적 잠금. 바뀐 필드가 없으면 감사·version 변경 없음.
+- 상한: 이슈 보드는 프로젝트당 최근 번호 1,000건까지 싣고(넘으면 안내), 상세 패널은 최근 댓글 200건(오래된 것은 건수만 안내).
 
 **Comment**: `id, issueId, authorId, body(마크다운), createdAt, updatedAt, deletedAt`
 - 본문 1–20,000자(0005 CHECK). VIEWER 이상 누구나 작성, 수정은 작성자 본인만, 삭제는 작성자 본인 또는 ADMIN(D21).
 - 삭제는 `deletedAt` 소프트 삭제다. 지운 댓글은 화면에 "삭제된 댓글"로만 남고 본문은 내려보내지 않는다. 지운 댓글은 수정할 수 없다(NOT_FOUND).
 - 수정은 version 없이 마지막 저장이 이긴다(작성자 한 사람만 고칠 수 있어 충돌 위험이 작다).
 - 감사: `comment.create`·`comment.update`(본문 전후)·`comment.delete`.
+- 이슈 하나의 댓글은 지운 것 포함 1,000개까지(넘으면 VALIDATION `comment_limit`).
+- 보존(수용, 리뷰 S-2): 지운 댓글의 본문은 DB 행과 감사(`comment.delete` before.body, `comment.update` 전후, `issue.delete` before.description)에 그대로 남는다. 화면·DTO 로는 내려보내지 않는다. 개인정보 삭제 요청 등에 대비한 ADMIN 전용 purge(본문 지우기·감사 마스킹)는 다음 단계 후보다.
 
 **마크다운(이슈 설명·댓글)**: `react-markdown` + `remark-gfm`(표·체크리스트·취소선) 서버 컴포넌트 렌더(D23).
 - raw HTML 은 렌더하지 않는다(`skipHtml`, `rehype-raw` 금지, `dangerouslySetInnerHTML` 금지 — 정적 검사).
@@ -428,10 +431,11 @@ sequenceDiagram
 | 무차별 대입 | 계정 5회 실패 15분 잠금, IP 당 분당 10회 제한(DB 기반), 실패 메시지 통일, 타이밍 균일화 |
 | 세션 탈취 | HttpOnly·Secure 쿠키, HSTS, 서버 측 세션 폐기, 유휴 만료 |
 | CSRF | Server Action Origin 검사, Auth.js CSRF 토큰, SameSite=Lax |
-| XSS | React 기본 이스케이프, 마크다운 raw HTML 비허용, nonce 기반 CSP (`script-src 'self' 'nonce-…'`, `object-src 'none'`, `frame-ancestors 'none'`) |
+| XSS | React 기본 이스케이프, 마크다운 raw HTML 비허용(서버 렌더, 링크는 http/https/mailto 이고 자격 정보 든 URL 제외, 이미지 미렌더), nonce 기반 CSP (`script-src 'self' 'nonce-…'`, `object-src 'none'`, `frame-ancestors 'none'`) |
 | SQL 인젝션 | Prisma 파라미터 바인딩만 사용, `$queryRawUnsafe` 금지(린트 규칙) |
 | 권한 우회(IDOR) | 모든 서버 경로 `requireRole`, 대상 ID 는 서버에서 존재·소속 확인 |
 | 대량 입력·DoS | Zod 로 길이·개수 제한, 요청 본문 크기 제한, 목록 페이지네이션 |
+| 감사 로그의 본문 보존 | 이슈 설명·댓글 본문은 감사 before/after 에 전문이 남는다(지운 댓글 포함). ADMIN 만 볼 감사 화면(4단계)에서만 노출, purge 는 다음 단계 후보(수용, 5.2) |
 | 비밀정보 유출 | `.env` 는 NAS 에만(권한 600), `.gitignore`·`.dockerignore` 로 제외, 로그에 토큰·비밀번호 마스킹 |
 | DB 직접 접근 | 호스트 포트 미공개, `internal` 네트워크, 앱 전용 DB 계정(최소 권한), superuser 는 마이그레이션에만 |
 | 컨테이너 탈출·변조 | non-root, read-only rootfs, `cap_drop: ALL`, `no-new-privileges`, 메모리·PID 제한 |
