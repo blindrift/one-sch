@@ -3,6 +3,8 @@ import type { Prisma } from '@prisma/client';
 import type { IssueDetail, IssueListItem } from '@/lib/issue/dto';
 import { parseIssueKey } from '@/lib/issue/status';
 import { NO_ASSIGNEE, PAGE_SIZE, type IssueListQuery } from '@/lib/list-query';
+import { treeOrder } from '@/lib/task-list';
+import { COMMENT_DETAIL_LIMIT, ISSUE_BOARD_LIMIT } from '@/lib/validation/limits';
 import { prisma } from '../db';
 import { toCommentDto } from './comment-service';
 import { toIssueDto } from './issue-dto';
@@ -111,10 +113,14 @@ function toListItem(r: ListRow): IssueListItem {
   };
 }
 
-/** 이슈 보드: 그 프로젝트의 이슈 전체(열 배치·순서는 화면의 lib/board 가 정한다) */
-export async function loadIssueBoard(projectId: string): Promise<IssueListItem[]> {
-  const rows = await prisma.issue.findMany({ where: { projectId }, select: LIST_SELECT, orderBy: [{ number: 'asc' }] });
-  return rows.map(toListItem);
+/**
+ * 이슈 보드: 그 프로젝트의 이슈(열 배치·순서는 화면의 lib/board 가 정한다). ISSUE_BOARD_LIMIT 건까지만 싣고
+ * 넘으면 truncated 로 알린다(최근 번호부터, 목록 탭에서 필터로 찾게 안내).
+ */
+export async function loadIssueBoard(projectId: string): Promise<{ items: IssueListItem[]; truncated: boolean }> {
+  const rows = await prisma.issue.findMany({ where: { projectId }, select: LIST_SELECT, orderBy: [{ number: 'desc' }], take: ISSUE_BOARD_LIMIT + 1 });
+  const truncated = rows.length > ISSUE_BOARD_LIMIT;
+  return { items: rows.slice(0, ISSUE_BOARD_LIMIT).map(toListItem), truncated };
 }
 
 /**
@@ -131,13 +137,19 @@ export async function getIssueDetail(key: string, scopeProjectId?: string): Prom
       assignee: { select: { name: true } },
       reporter: { select: { name: true } },
       task: { select: { id: true, title: true } },
+      // 최근 것부터 COMMENT_DETAIL_LIMIT 건만 읽고 작성 순으로 뒤집는다(오래된 것은 건수만 알린다)
       comments: {
-        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: COMMENT_DETAIL_LIMIT,
         select: { id: true, authorId: true, body: true, createdAt: true, updatedAt: true, deletedAt: true, author: { select: { name: true } } },
       },
     },
   });
   if (!row) return null;
+  const [total, alive] = await Promise.all([
+    prisma.comment.count({ where: { issueId: row.id } }),
+    prisma.comment.count({ where: { issueId: row.id, deletedAt: null } }),
+  ]);
   return {
     ...toIssueDto(row, row.project.key),
     projectName: row.project.name,
@@ -145,11 +157,14 @@ export async function getIssueDetail(key: string, scopeProjectId?: string): Prom
     assigneeName: row.assignee?.name ?? null,
     reporterName: row.reporter.name,
     task: row.task,
-    comments: row.comments.map(toCommentDto),
+    comments: row.comments.reverse().map(toCommentDto),
+    olderCommentCount: Math.max(0, total - row.comments.length),
+    commentCount: alive,
   };
 }
 
-/** 이슈 대화상자의 연결 작업 후보(그 프로젝트의 작업 id·제목, 간트 순서) */
+/** 이슈 대화상자의 연결 작업 후보(그 프로젝트의 작업 id·제목, 간트와 같은 계층 순서) */
 export async function listTaskOptions(projectId: string): Promise<Array<{ id: string; title: string }>> {
-  return prisma.task.findMany({ where: { projectId }, select: { id: true, title: true }, orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] });
+  const rows = await prisma.task.findMany({ where: { projectId }, select: { id: true, title: true, parentId: true, sortOrder: true } });
+  return treeOrder(rows).map(({ id, title }) => ({ id, title }));
 }

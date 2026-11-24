@@ -14,14 +14,15 @@ export type TaskListRow = TaskDto & {
   late: boolean;
 };
 
-export type TaskListPage = { rows: TaskListRow[]; total: number; page: number; pageCount: number };
+export type TaskListPage = { rows: TaskListRow[]; total: number; page: number; pageCount: number; /** 강조할 작업이 이 페이지에 있으면 그 id */ focusId: string | null };
 
-const bySortOrder = (a: TaskDto, b: TaskDto) => a.sortOrder - b.sortOrder || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+type TreeItem = { id: string; parentId: string | null; sortOrder: number };
+const bySortOrder = (a: TreeItem, b: TreeItem) => a.sortOrder - b.sortOrder || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /** 간트와 같은 순서: 같은 상위의 형제는 sortOrder 순, 상위 다음에 그 하위(깊이 우선). 상위가 목록에 없으면 최상위로 본다 */
-export function treeOrder(tasks: readonly TaskDto[]): TaskDto[] {
+export function treeOrder<T extends TreeItem>(tasks: readonly T[]): T[] {
   const ids = new Set(tasks.map((t) => t.id));
-  const children = new Map<string | null, TaskDto[]>();
+  const children = new Map<string | null, T[]>();
   for (const t of tasks) {
     const key = t.parentId && ids.has(t.parentId) ? t.parentId : null;
     const list = children.get(key);
@@ -29,7 +30,7 @@ export function treeOrder(tasks: readonly TaskDto[]): TaskDto[] {
     else children.set(key, [t]);
   }
   for (const list of children.values()) list.sort(bySortOrder);
-  const out: TaskDto[] = [];
+  const out: T[] = [];
   const seen = new Set<string>();
   const visit = (parent: string | null) => {
     for (const t of children.get(parent) ?? []) {
@@ -102,6 +103,8 @@ export function buildTaskList(tasks: readonly TaskDto[], users: readonly UserOpt
 
   const total = rows.length;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const page = Math.min(query.page, pageCount);
-  return { rows: rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), total, page, pageCount };
+  // 강조할 작업이 걸러진 결과에 있으면 그 작업이 있는 페이지를 보인다(page 값보다 우선)
+  const focusIndex = query.task ? rows.findIndex((r) => r.id === query.task) : -1;
+  const page = focusIndex >= 0 ? Math.floor(focusIndex / PAGE_SIZE) + 1 : Math.min(query.page, pageCount);
+  return { rows: rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), total, page, pageCount, focusId: focusIndex >= 0 ? query.task : null };
 }

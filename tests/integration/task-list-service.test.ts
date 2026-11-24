@@ -60,11 +60,15 @@ describe('listTasks', () => {
     expect(await titles({ assignee: 'none' })).toEqual(['배포', '미래 작업']);
     expect(await titles({ q: 'login' })).toEqual(['Login 화면']);
     expect(await titles({ q: '%' })).toEqual([]);
+    await add('100% 완료');
+    expect(await titles({ q: '%' })).toEqual(['100% 완료']);
+    expect(await titles({ q: '_' })).toEqual([]);
     const rows = (await listTasks(projectId, q())).rows;
     expect(rows.map((t) => [t.title, t.late, t.assigneeName])).toEqual([
       ['Login 화면', true, '나'],
       ['배포', false, null],
       ['미래 작업', false, null],
+      ['100% 완료', true, null],
     ]);
   });
 
@@ -78,5 +82,23 @@ describe('listTasks', () => {
     expect(all.slice(0, 27).every((t) => t.endDate === '2020-02-01')).toBe(true);
     expect(all.slice(0, 27).map((t) => t.title)).toEqual([...all.slice(0, 27).map((t) => t.title)].sort());
     expect((await listTasks(projectId, q({ page: 7 }))).page).toBe(2);
+  });
+
+  it('페이지 경계: 정확히 50건은 1쪽, 51건은 2쪽에 1건(T-6)', async () => {
+    for (let i = 0; i < 50; i += 1) await add(`p${i}`);
+    expect([(await listTasks(projectId, q())).pageCount, (await listTasks(projectId, q())).rows.length]).toEqual([1, 50]);
+    await add('p50');
+    const p2 = await listTasks(projectId, q({ page: 2 }));
+    expect([p2.pageCount, p2.page, p2.rows.map((t) => t.title)]).toEqual([2, 2, ['p50']]);
+  });
+
+  it('task= 로 강조하면 그 작업이 있는 페이지를 보이고 focusId 를 준다(F6). 걸러진 작업·없는 id 는 무시', async () => {
+    for (let i = 0; i < 55; i += 1) await add(`f${i}`, { status: i === 52 ? 'DONE' : 'TODO' });
+    const target = (await prisma.task.findFirstOrThrow({ where: { title: 'f52' } })).id;
+    const r = await listTasks(projectId, q({ task: target }));
+    expect([r.page, r.focusId, r.rows.some((t) => t.id === target)]).toEqual([2, target, true]);
+    const filtered = await listTasks(projectId, q({ task: target, status: 'TODO' }));
+    expect([filtered.page, filtered.focusId]).toEqual([1, null]);
+    expect((await listTasks(projectId, q({ task: '3f1c2b9e-8d4a-4c3b-9a2e-1f0e5d6c7b8a' }))).focusId).toBeNull();
   });
 });

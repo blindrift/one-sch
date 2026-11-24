@@ -25,6 +25,7 @@ import { ISSUE_STATUSES, ISSUE_STATUS_COLORS, ISSUE_STATUS_LABELS, type IssueSta
 import type { ProjectDto, TaskDto, TimelineData } from '@/lib/schedule/dto';
 import { isLate } from '@/lib/schedule/rollup';
 import { TASK_STATUSES, TASK_STATUS_COLORS, TASK_STATUS_LABELS, type TaskStatus } from '@/lib/schedule/status';
+import { ISSUE_BOARD_LIMIT } from '@/lib/validation/limits';
 import { updateIssue } from '@/server/actions/issue';
 import { updateTask } from '@/server/actions/task';
 import { TaskFormDialog, type DependencyItem } from '../../../timeline/task-form-dialog';
@@ -51,20 +52,24 @@ const KEYBOARD_CODES = { start: ['Space'], cancel: ['Escape'], end: ['Space', 'E
 
 type Message = { kind: 'error'; text: string };
 
-/** 서버 값이 새로 오면(router.refresh·이동) 낙관 상태를 버리고 다시 시작한다 */
-function useServerState<T>(value: T): [T, (next: T | ((prev: T) => T)) => void] {
+/**
+ * 서버 값이 새로 오면(router.refresh·이동) 낙관 상태를 버리고 다시 시작한다.
+ * 저장 중(busy)에 온 서버 값은 저장 전에 읽은 값일 수 있어 덮어쓰지 않는다(저장 결과는 응답 값으로 반영한다).
+ */
+function useServerState<T>(value: T, busy: boolean): [T, (next: T | ((prev: T) => T)) => void] {
   const [source, setSource] = useState(value);
   const [state, setState] = useState(value);
   if (source !== value) {
     setSource(value);
-    setState(value);
+    if (!busy) setState(value);
   }
   return [state, setState];
 }
 
 export function TaskBoard({ project, data, canEdit, includeParents }: { project: ProjectDto; data: TimelineData; canEdit: boolean; includeParents: boolean }) {
   const router = useRouter();
-  const [tasks, setTasks] = useServerState(data.tasks);
+  const [pending, setPending] = useState(0);
+  const [tasks, setTasks] = useServerState(data.tasks, pending > 0);
   const [message, setMessage] = useState<Message | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const saving = useRef(new Set<string>());
@@ -76,6 +81,7 @@ export function TaskBoard({ project, data, canEdit, includeParents }: { project:
     const before = tasks.find((t) => t.id === id);
     if (!before || before.status === to || saving.current.has(id)) return;
     saving.current.add(id);
+    setPending((n) => n + 1);
     setTasks((list) => list.map((t) => (t.id === id ? { ...t, status: to } : t)));
     try {
       const r = await updateTask({ id, version: before.version, status: to });
@@ -93,6 +99,7 @@ export function TaskBoard({ project, data, canEdit, includeParents }: { project:
       setMessage({ kind: 'error', text: '저장하지 못했습니다. 네트워크를 확인해 주세요.' });
     } finally {
       saving.current.delete(id);
+      setPending((n) => n - 1);
     }
   }
 
@@ -158,11 +165,12 @@ export function TaskBoard({ project, data, canEdit, includeParents }: { project:
   );
 }
 
-export function IssueBoard({ issues, canEdit, today }: { issues: IssueListItem[]; canEdit: boolean; today: string }) {
+export function IssueBoard({ issues, truncated, canEdit, today }: { issues: IssueListItem[]; truncated: boolean; canEdit: boolean; today: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const [items, setItems] = useServerState(issues);
+  const [pending, setPending] = useState(0);
+  const [items, setItems] = useServerState(issues, pending > 0);
   const [message, setMessage] = useState<Message | null>(null);
   const saving = useRef(new Set<string>());
   const cols: BoardColumns<IssueStatus, IssueListItem> = issueColumns(items);
@@ -171,13 +179,15 @@ export function IssueBoard({ issues, canEdit, today }: { issues: IssueListItem[]
     const before = items.find((i) => i.id === id);
     if (!before || before.status === to || saving.current.has(id)) return;
     saving.current.add(id);
+    setPending((n) => n + 1);
     setItems((list) => list.map((i) => (i.id === id ? { ...i, status: to } : i)));
     try {
       const r = await updateIssue({ id, version: before.version, status: to });
       if (r.ok) {
         setItems((list) => list.map((i) => (i.id === id ? { ...i, status: r.data.status, version: r.data.version, updatedAt: r.data.updatedAt } : i)));
         setMessage(null);
-        router.refresh();
+        // 응답 값만 반영한다(다시 읽으면 저장 중인 다른 카드의 낙관 상태를 덮을 수 있다). 열린 상세 패널이 이 이슈면 패널만 새로 읽는다
+        if (params.get('issue') === before.key) router.refresh();
         return;
       }
       setItems((list) => list.map((i) => (i.id === id ? before : i)));
@@ -188,6 +198,7 @@ export function IssueBoard({ issues, canEdit, today }: { issues: IssueListItem[]
       setMessage({ kind: 'error', text: '저장하지 못했습니다. 네트워크를 확인해 주세요.' });
     } finally {
       saving.current.delete(id);
+      setPending((n) => n - 1);
     }
   }
 
@@ -199,6 +210,7 @@ export function IssueBoard({ issues, canEdit, today }: { issues: IssueListItem[]
 
   return (
     <Board<IssueStatus, IssueListItem>
+      notice={truncated ? `이슈가 많아 최근 ${ISSUE_BOARD_LIMIT.toLocaleString('ko-KR')}건만 보입니다. 나머지는 이슈 탭에서 필터·검색으로 찾아 주세요.` : null}
       statuses={ISSUE_STATUSES}
       labels={ISSUE_STATUS_LABELS}
       colors={ISSUE_STATUS_COLORS}
@@ -233,6 +245,8 @@ type BoardProps<S extends string, C extends { id: string; status: S }> = {
   colors: Record<S, string>;
   columns: BoardColumns<S, C>;
   canDrag: boolean;
+  /** 보드 위 안내(예: 이슈가 많아 일부만 보임) */
+  notice?: string | null;
   message: Message | null;
   onDismiss: () => void;
   onMove: (id: string, to: S) => void;
@@ -272,6 +286,11 @@ function Board<S extends string, C extends { id: string; status: S }>(props: Boa
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {props.notice ? (
+        <p role="status" data-testid="board-notice" className="mx-4 mt-3 rounded-lg border border-line bg-surface-muted px-3 py-2 text-[13px] text-muted-foreground">
+          {props.notice}
+        </p>
+      ) : null}
       {message ? (
         <div role="alert" data-testid="board-message" className="mx-4 mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-700">
           <CircleAlert className="size-4 shrink-0" aria-hidden />

@@ -51,7 +51,12 @@ export type IssueDetail = IssueDto & {
   assigneeName: string | null;
   reporterName: string;
   task: { id: string; title: string } | null;
+  /** 최근 댓글(작성 순, 최대 COMMENT_DETAIL_LIMIT 건) */
   comments: CommentDto[];
+  /** 위 목록에서 생략한 오래된 댓글 수(지운 댓글 포함) */
+  olderCommentCount: number;
+  /** 지우지 않은 댓글 수(전체) */
+  commentCount: number;
 };
 
 export type IssueDeleteResult = { id: string };

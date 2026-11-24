@@ -28,6 +28,9 @@ describe('safeMarkdownUrl', () => {
     '//evil.example/x',
     '/relative',
     '#anchor',
+    'https://bank.example@evil.example/login',
+    'https://user:pass@example.com/',
+    'http://:secret@example.com',
     '',
   ])('%j 제거', (input) => {
     expect(safeMarkdownUrl(input)).toBe('');

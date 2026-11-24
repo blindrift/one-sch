@@ -283,6 +283,8 @@ export async function deleteTask(actor: Actor, input: DeleteTaskInput, meta: Req
       select: { id: true, fromTaskId: true, toTaskId: true },
     });
 
+    // 연결된 이슈는 남고 taskId 만 NULL 이 된다(FK SetNull). 이슈 쪽 감사·version 에는 남지 않으므로 여기 기록한다
+    const linkedIssues = (await tx.issue.findMany({ where: { taskId: { in: allIds } }, select: { id: true, taskId: true } })).map((i) => ({ id: i.id, taskId: i.taskId }));
     const { count } = await tx.task.deleteMany({ where: { id: row.id, version: row.version } });
     if (count !== 1) throw conflict('version');
     const ancestors = await recalcAncestors(tx, row.parentId);
@@ -295,6 +297,7 @@ export async function deleteTask(actor: Actor, input: DeleteTaskInput, meta: Req
         ...snapshot(toTaskDto(row, descendantIds.length > 0)),
         descendants,
         dependencies,
+        ...(linkedIssues.length ? { unlinkedIssues: linkedIssues } : {}),
       },
       after: ancestors.length ? { rollup: rollupAudit(ancestors) } : null,
       meta,

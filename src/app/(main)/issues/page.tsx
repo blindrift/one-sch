@@ -30,6 +30,7 @@ export default async function IssuesPage({ searchParams }: { searchParams: Promi
         query={query}
         list={list}
         detail={detail}
+        requestedKey={issueKey}
         detailTaskOptions={detailTaskOptions}
         me={me}
         users={users}

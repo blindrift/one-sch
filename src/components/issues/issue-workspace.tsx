@@ -14,7 +14,7 @@ import type { UserOption } from '@/lib/schedule/dto';
 import type { SessionUser } from '@/server/auth/current-user';
 import type { IssueListPage } from '@/server/services/issue-query-service';
 import { NewIssueButton } from './issue-client';
-import { IssueDetailPanel } from './issue-detail-panel';
+import { IssueDetailPanel, IssueNotFoundPanel } from './issue-detail-panel';
 import type { ProjectOption, TaskOption } from './issue-form-dialog';
 import { IssueList } from './issue-list';
 
@@ -27,6 +27,7 @@ export function IssueWorkspace({
   query,
   list,
   detail,
+  requestedKey,
   detailTaskOptions,
   me,
   users,
@@ -39,6 +40,8 @@ export function IssueWorkspace({
   query: IssueListQuery;
   list: IssueListPage;
   detail: IssueDetail | null;
+  /** URL 의 ?issue= 값(없으면 null). 있는데 detail 이 없으면 '찾을 수 없음' 안내 */
+  requestedKey: string | null;
   detailTaskOptions: TaskOption[];
   me: SessionUser;
   users: UserOption[];
@@ -117,7 +120,11 @@ export function IssueWorkspace({
           </div>
           <Pager page={list.page} pageCount={list.pageCount} total={list.total} hrefFor={(page) => href({ page }, detail?.key ?? null)} />
         </div>
-        {detail ? <IssueDetailPanel detail={detail} me={me} users={users} taskOptions={detailTaskOptions} closeHref={href({})} /> : null}
+        {detail ? (
+          <IssueDetailPanel detail={detail} me={me} users={users} taskOptions={detailTaskOptions} closeHref={href({})} />
+        ) : requestedKey ? (
+          <IssueNotFoundPanel closeHref={href({})} />
+        ) : null}
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import 'server-only';
 import type { CommentDto } from '@/lib/issue/dto';
 import type { Role } from '@/lib/roles';
+import { COMMENTS_PER_ISSUE_MAX } from '@/lib/validation/limits';
 import type { AddCommentInput, DeleteCommentInput, UpdateCommentInput } from '@/lib/validation/comment';
 import { AppError } from '../action-result';
 import { writeAudit } from '../audit';
@@ -59,6 +60,11 @@ export async function addComment(actor: CommentActor, input: AddCommentInput, me
     // 잠금 사이에 이슈가 지워졌을 수 있다
     if (!(await tx.issue.findUnique({ where: { id: input.issueId }, select: { id: true } }))) throw new AppError('NOT_FOUND');
     await ensureWritableProject(tx, projectId);
+    // 이슈 하나에 댓글이 끝없이 쌓이지 않게 한다(지운 것도 행이 남으므로 함께 센다). 같은 프로젝트 잠금 안이라 경쟁 없음
+    if ((await tx.comment.count({ where: { issueId: input.issueId } })) >= COMMENTS_PER_ISSUE_MAX) {
+      const message = `이슈 하나에는 댓글을 ${COMMENTS_PER_ISSUE_MAX.toLocaleString('ko-KR')}개까지 쓸 수 있습니다.`;
+      throw new AppError('VALIDATION', 'comment_limit', message, { body: [message] });
+    }
     // 고침 여부(edited)를 updatedAt ≠ createdAt 으로 판정하므로 두 값을 같은 시각으로 넣는다
     const now = new Date();
     const created = await tx.comment.create({

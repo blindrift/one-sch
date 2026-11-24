@@ -5,13 +5,14 @@ import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalList
 import { CSS } from '@dnd-kit/utilities';
 import { CircleAlert, GripVertical, Plus, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useId, useState, useTransition, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, useTransition, type ReactNode } from 'react';
 import { ariaSort, SortHeaderLink, type SortLink } from '@/components/list/pager';
 import { Button } from '@/components/ui/button';
 import type { TaskSort } from '@/lib/list-query';
 import type { ProjectDto, TimelineData } from '@/lib/schedule/dto';
 import { TASK_STATUS_COLORS, TASK_STATUS_LABELS } from '@/lib/schedule/status';
 import type { TaskListRow } from '@/lib/task-list';
+import { isAncestor } from '@/lib/schedule/graph';
 import { siblingAnchor } from '@/lib/schedule/reorder';
 import { reorderTask } from '@/server/actions/task';
 import { TaskFormDialog, type DependencyItem } from '../../../timeline/task-form-dialog';
@@ -39,6 +40,7 @@ export function TaskListView({
   sortLinks,
   orderLink,
   orderMode,
+  focusId,
 }: {
   project: ProjectDto;
   rows: TaskListRow[];
@@ -47,6 +49,8 @@ export function TaskListView({
   sortLinks: Record<TaskSort, SortLink>;
   orderLink: SortLink;
   orderMode: boolean;
+  /** 강조할 작업(이슈의 연결 작업 링크로 들어온 경우) */
+  focusId: string | null;
 }) {
   const router = useRouter();
   const [dialog, setDialog] = useState<DialogState>({ open: false });
@@ -54,6 +58,8 @@ export function TaskListView({
   const [reordering, startReorder] = useTransition();
   const refresh = () => router.refresh();
   const canReorder = canEdit && orderMode;
+  /** 저장 중에는 끌 수 없다(옛 version·순서로 다시 옮기지 않게). 손잡이는 남겨 둔다 */
+  const dragLocked = !canReorder || reordering;
   const titleOf = (id: string) => rows.find((r) => r.id === id)?.title ?? '';
   const dndId = useId();
   const sensors = useSensors(
@@ -69,7 +75,12 @@ export function TaskListView({
     const to = rows.findIndex((r) => r.id === overId);
     const moving = rows[from];
     // 놓은 행이 형제의 하위면 그 형제를 기준으로 삼는다(다른 상위 아래·자기 하위면 거부)
-    const anchorId = moving && to >= 0 ? siblingAnchor(new Map(data.tasks.map((t) => [t.id, t.parentId])), moving.id, overId) : null;
+    const parentOf = new Map(data.tasks.map((t) => [t.id, t.parentId]));
+    if (moving && isAncestor(parentOf, moving.id, overId)) {
+      setMessage('자기 하위 작업 위치로는 옮길 수 없습니다.');
+      return;
+    }
+    const anchorId = moving && to >= 0 ? siblingAnchor(parentOf, moving.id, overId) : null;
     if (!moving || !anchorId) {
       setMessage('같은 상위 작업 아래의 작업끼리만 순서를 바꿀 수 있습니다.');
       return;
@@ -149,7 +160,7 @@ export function TaskListView({
             screenReaderInstructions: { draggable: '순서를 바꾸려면 Space 를 누르고 위·아래 화살표로 옮긴 뒤 Space 로 놓습니다. Esc 는 취소입니다.' },
           }}
         >
-          <SortableContext items={rows.map((r) => r.id)} strategy={verticalListSortingStrategy} disabled={!canReorder}>
+          <SortableContext items={rows.map((r) => r.id)} strategy={verticalListSortingStrategy} disabled={dragLocked}>
             <table className="w-full text-sm" data-testid="task-list">
               <thead className="bg-surface-muted text-left text-xs text-muted-foreground">
                 <tr className="border-b border-line">
@@ -180,6 +191,8 @@ export function TaskListView({
                     id={r.id}
                     title={r.title}
                     canReorder={canReorder}
+                    locked={reordering}
+                    focused={r.id === focusId}
                     className={`border-b border-line last:border-0 ${canEdit ? 'cursor-pointer hover:bg-surface-muted/60' : ''}`}
                     onClick={canEdit ? () => setDialog({ open: true, taskId: r.id }) : undefined}
                   >
@@ -257,6 +270,8 @@ function SortableRow({
   id,
   title,
   canReorder,
+  locked,
+  focused,
   className,
   onClick,
   children,
@@ -264,18 +279,29 @@ function SortableRow({
   id: string;
   title: string;
   canReorder: boolean;
+  /** 저장 중: 손잡이는 보이되 끌 수 없다 */
+  locked: boolean;
+  focused: boolean;
   className: string;
   onClick?: () => void;
   children: ReactNode;
 }) {
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id, disabled: !canReorder });
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id, disabled: !canReorder || locked });
+  const rowRef = useRef<HTMLTableRowElement | null>(null);
+  useEffect(() => {
+    if (focused) rowRef.current?.scrollIntoView({ block: 'center' });
+  }, [focused]);
   return (
     <tr
-      ref={setNodeRef}
+      ref={(el) => {
+        setNodeRef(el);
+        rowRef.current = el;
+      }}
       data-testid={`task-row-${id}`}
+      aria-current={focused ? 'true' : undefined}
       data-dragging={isDragging || undefined}
       style={{ transform: CSS.Translate.toString(transform), transition }}
-      className={`${className} ${isDragging ? 'relative z-10 bg-background shadow-md' : ''}`}
+      className={`${className} ${focused ? 'bg-brand-soft/70' : ''} ${isDragging ? 'relative z-10 bg-background shadow-md' : ''}`}
       onClick={onClick}
     >
       <td className="py-2 pl-3">

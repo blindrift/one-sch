@@ -59,9 +59,11 @@ export type TaskListQuery = {
   assignee: string | null;
   q: string;
   page: number;
+  /** 강조할 작업 id(이슈 상세의 연결 작업 링크). 있으면 그 작업이 있는 페이지를 보이고 행을 강조한다. 링크·필터에는 싣지 않는다 */
+  task: string | null;
 };
 
-export const DEFAULT_TASK_QUERY: TaskListQuery = { sort: 'order', dir: 'asc', status: null, assignee: null, q: '', page: 1 };
+export const DEFAULT_TASK_QUERY: TaskListQuery = { sort: 'order', dir: 'asc', status: null, assignee: null, q: '', page: 1, task: null };
 
 export function parseTaskListQuery(sp: SearchParams): TaskListQuery {
   return {
@@ -71,6 +73,10 @@ export function parseTaskListQuery(sp: SearchParams): TaskListQuery {
     assignee: parseAssignee(first(sp.assignee)),
     q: parseQ(first(sp.q)),
     page: parsePage(first(sp.page)),
+    task: (() => {
+      const t = first(sp.task);
+      return t && UUID_RE.test(t) ? t.toLowerCase() : null;
+    })(),
   };
 }
 

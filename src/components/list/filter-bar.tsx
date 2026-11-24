@@ -31,6 +31,7 @@ export function FilterBar({ filters, q, placeholder, children }: { filters: Filt
     }
     next.delete('page');
     next.delete('issue');
+    next.delete('task');
     const qs = next.toString();
     startTransition(() => router.push(qs ? `${pathname}?${qs}` : pathname));
   }

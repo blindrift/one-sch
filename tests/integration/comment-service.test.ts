@@ -63,6 +63,17 @@ describe('addComment', () => {
   });
 });
 
+describe('댓글 수 상한(F8)', () => {
+  it('이슈당 1,000개(지운 것 포함)를 넘으면 VALIDATION(comment_limit), 다른 이슈는 영향 없음', async () => {
+    await prisma.comment.createMany({ data: Array.from({ length: 999 }, (_, i) => ({ issueId, authorId: member.id, body: `c${i}`, deletedAt: i % 2 ? new Date() : null })) });
+    expect(await reasonOf(comments.addComment(viewer, { issueId, body: '1000번째' }, meta))).toBe('OK');
+    expect(await reasonOf(comments.addComment(viewer, { issueId, body: '1001번째' }, meta))).toBe('VALIDATION:comment_limit');
+    expect(await prisma.comment.count({ where: { issueId } })).toBe(1000);
+    const other = await issues.createIssue(member, { projectId, title: 'j', description: '', type: 'ISSUE', status: 'OPEN', priority: 'MEDIUM' }, meta);
+    expect(await reasonOf(comments.addComment(viewer, { issueId: other.id, body: 'x' }, meta))).toBe('OK');
+  });
+});
+
 describe('updateComment', () => {
   it('작성자만 고친다(ADMIN 도 남의 댓글은 못 고침). 감사에 본문 전후', async () => {
     const c = await comments.addComment(viewer, { issueId, body: '처음' }, meta);

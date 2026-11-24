@@ -22,7 +22,8 @@ export default async function ProjectListPage({ params, searchParams }: { params
   const list = await listTasks(project.id, query);
 
   const base = `/projects/${project.key}/list`;
-  const href = (patch: Partial<TaskListQuery>) => `${base}${toQueryString({ ...query, ...patch }, DEFAULT_TASK_QUERY)}`;
+  // 링크에는 강조(task)를 싣지 않는다(정렬·페이지를 바꾸면 강조는 풀린다)
+  const href = (patch: Partial<TaskListQuery>) => `${base}${toQueryString({ ...query, page: list.page, task: null, ...patch }, DEFAULT_TASK_QUERY)}`;
   const sortLink = (sort: TaskSort): SortLink => {
     const active = query.sort === sort;
     return { active, dir: query.dir, href: href({ sort, dir: active && query.dir === 'asc' ? 'desc' : 'asc', page: 1 }) };
@@ -62,6 +63,7 @@ export default async function ProjectListPage({ params, searchParams }: { params
         sortLinks={sortLinks}
         orderLink={sortLinks.order}
         orderMode={isOrderMode(query)}
+        focusId={list.focusId}
       />
       <Pager page={list.page} pageCount={list.pageCount} total={list.total} hrefFor={(page) => href({ page })} />
     </AppShell>

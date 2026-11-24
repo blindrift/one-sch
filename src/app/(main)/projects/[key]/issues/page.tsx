@@ -35,6 +35,7 @@ export default async function ProjectIssuesPage({ params, searchParams }: { para
         query={query}
         list={list}
         detail={detail}
+        requestedKey={issueKey}
         detailTaskOptions={taskOptions}
         me={me}
         users={users}

@@ -117,4 +117,49 @@ describe('reorderTask', () => {
     expect((await order(null)).sort()).toEqual(['a', 'b', 'c', 'd', 'e']);
     expect(await prisma.auditLog.count({ where: { action: 'task.reorder' } })).toBe(3);
   });
+
+  it('하위가 있는 작업을 옮기면 하위도 따라가고(간트·목록 순서), 형제 sortOrder 값 집합은 그대로(T-7)', async () => {
+    const a = await add('a');
+    const a1 = await add('a1', a.id);
+    const b = await add('b');
+    const c = await add('c');
+    const before = (await prisma.task.findMany({ where: { projectId, parentId: null } })).map((t) => t.sortOrder).sort((x, y) => x - y);
+    await tasks.reorderTask(me, { id: a.id, version: (await prisma.task.findUniqueOrThrow({ where: { id: a.id } })).version, afterId: c.id }, meta);
+    const after = (await prisma.task.findMany({ where: { projectId, parentId: null } })).map((t) => t.sortOrder).sort((x, y) => x - y);
+    expect(after).toEqual(before);
+    expect((await listTasks(projectId, DEFAULT_TASK_QUERY)).rows.map((t) => t.title)).toEqual(['b', 'c', 'a', 'a1']);
+    expect((await prisma.task.findUniqueOrThrow({ where: { id: a1.id } })).parentId).toBe(a.id);
+    expect(b.id && a1.id).toBeTruthy();
+  });
+
+  it('같은 version 으로 동시에 두 번 옮기면 하나만 성공(OK 1·CONFLICT 1)', async () => {
+    const a = await add('a');
+    const b = await add('b');
+    const c = await add('c');
+    const results = await Promise.all([
+      reasonOf(tasks.reorderTask(me, { id: c.id, version: 0, beforeId: a.id }, meta)),
+      reasonOf(tasks.reorderTask(me, { id: c.id, version: 0, beforeId: b.id }, meta)),
+    ]);
+    expect(results.sort()).toEqual(['CONFLICT:version', 'OK']);
+    expect(await version(c.id)).toBe(1);
+    expect(await prisma.auditLog.count({ where: { action: 'task.reorder' } })).toBe(1);
+  });
+
+  it('없는 작업은 NOT_FOUND', async () => {
+    const a = await add('a');
+    expect(await reasonOf(tasks.reorderTask(me, { id: '3f1c2b9e-8d4a-4c3b-9a2e-1f0e5d6c7b8a', version: 0, beforeId: a.id }, meta))).toBe('NOT_FOUND:');
+  });
+
+  it('형제 sortOrder 가 겹친 옛 데이터도 옮긴 뒤에는 겹치지 않는다', async () => {
+    const a = await add('a');
+    const b = await add('b');
+    const c = await add('c');
+    await prisma.task.updateMany({ where: { id: { in: [a.id, b.id, c.id] } }, data: { sortOrder: 5 } });
+    await tasks.reorderTask(me, { id: c.id, version: 0, beforeId: a.id }, meta);
+    const rows = await prisma.task.findMany({ where: { projectId }, orderBy: { sortOrder: 'asc' } });
+    expect(rows.map((t) => t.sortOrder)).toEqual([5, 6, 7]);
+    // 겹친 값은 id 순으로 읽혔다가 c 가 a 바로 앞으로 간다
+    const titles = rows.map((t) => t.title);
+    expect(titles.indexOf('c') + 1).toBe(titles.indexOf('a'));
+  });
 });

@@ -56,7 +56,7 @@ export async function loadTimeline(query: TimelineQuery = {}): Promise<TimelineD
         url: true,
         memo: true,
       },
-      orderBy: [{ projectId: 'asc' }, { sortOrder: 'asc' }],
+      orderBy: [{ projectId: 'asc' }, { sortOrder: 'asc' }, { id: 'asc' }],
     }),
     prisma.taskDependency.findMany({
       where: { fromTask: { projectId: { in: projectIds } }, toTask: { projectId: { in: projectIds } } },

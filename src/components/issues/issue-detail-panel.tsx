@@ -31,7 +31,7 @@ export function IssueDetailPanel({
 }) {
   const writable = !detail.projectArchived;
   const canEdit = writable && hasRole(me.role, 'MEMBER');
-  const commentCount = detail.comments.filter((c) => !c.deleted).length;
+  const commentCount = detail.commentCount;
   const row = (label: string, value: React.ReactNode) => (
     <div className="flex items-center gap-3 py-1 text-[13px]">
       <dt className="w-16 shrink-0 text-xs text-muted-foreground">{label}</dt>
@@ -71,7 +71,7 @@ export function IssueDetailPanel({
           {row(
             '연결 작업',
             detail.task ? (
-              <Link href={`/projects/${detail.projectKey}/list?q=${encodeURIComponent(detail.task.title.slice(0, 100))}`} className="text-brand hover:underline">
+              <Link href={`/projects/${detail.projectKey}/list?task=${detail.task.id}`} className="text-brand hover:underline" data-testid="issue-task-link">
                 {detail.task.title}
               </Link>
             ) : (
@@ -86,6 +86,11 @@ export function IssueDetailPanel({
         </section>
         <section aria-label="댓글" className="flex flex-col gap-2">
           <h3 className="text-sm font-semibold">댓글 {commentCount}</h3>
+          {detail.olderCommentCount > 0 ? (
+            <p className="text-xs text-text-subtle" data-testid="comment-older">
+              이전 댓글 {detail.olderCommentCount.toLocaleString('ko-KR')}건은 표시하지 않았습니다(최근 {detail.comments.length}건).
+            </p>
+          ) : null}
           <ul className="flex flex-col" data-testid="comment-list">
             {detail.comments.map((c) => (
               <CommentItem
@@ -100,6 +105,22 @@ export function IssueDetailPanel({
           </ul>
           {writable ? <CommentForm issueId={detail.id} /> : null}
         </section>
+      </div>
+    </aside>
+  );
+}
+
+/** ?issue= 가 없는 번호·다른 프로젝트·잘못된 형식일 때 패널 자리에 보이는 안내 */
+export function IssueNotFoundPanel({ closeHref }: { closeHref: string }) {
+  return (
+    <aside aria-label="이슈 상세" data-testid="issue-panel-missing" className="flex w-full shrink-0 flex-col gap-3 border-l border-line bg-background px-5 py-4 lg:w-[460px]">
+      <div className="flex items-start gap-2">
+        <p role="status" className="flex-1 text-sm text-muted-foreground">
+          이슈를 찾을 수 없습니다. 지워졌거나 이 화면의 프로젝트에 속하지 않는 번호입니다.
+        </p>
+        <Link href={closeHref} scroll={false} aria-label="상세 닫기" className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-text-subtle hover:bg-surface-muted hover:text-foreground">
+          <X className="size-4" />
+        </Link>
       </div>
     </aside>
   );

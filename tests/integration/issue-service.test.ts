@@ -190,5 +190,8 @@ describe('deleteIssue', () => {
     const row = await prisma.issue.findUniqueOrThrow({ where: { id: a.id } });
     expect(row.taskId).toBeNull();
     expect(row.version).toBe(0);
+    // 이슈 쪽에는 감사가 없으므로 작업 삭제 감사에 연결 해제를 남긴다
+    const log = await prisma.auditLog.findFirstOrThrow({ where: { action: 'task.delete', entityId: t.id } });
+    expect((log.before as { unlinkedIssues: unknown }).unlinkedIssues).toEqual([{ id: a.id, taskId: t.id }]);
   });
 });

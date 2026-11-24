@@ -143,11 +143,50 @@ describe('getIssueDetail', () => {
 });
 
 describe('loadIssueBoard', () => {
-  it('그 프로젝트의 이슈 전체(페이지 없음)', async () => {
+  it('그 프로젝트의 이슈 전체(페이지 없음), 1,000건 상한을 넘으면 최근 번호 1,000건과 truncated', async () => {
     await prisma.issue.createMany({
       data: Array.from({ length: PAGE_SIZE + 5 }, (_, i) => ({ projectId: erp, number: i + 1, title: `i${i}`, reporterId: me.id })),
     });
     await add({ projectId: ops });
-    expect(await loadIssueBoard(erp)).toHaveLength(PAGE_SIZE + 5);
+    const small = await loadIssueBoard(erp);
+    expect([small.items.length, small.truncated]).toEqual([PAGE_SIZE + 5, false]);
+    await prisma.issue.createMany({
+      data: Array.from({ length: 1001 }, (_, i) => ({ projectId: ops, number: i + 2, title: `o${i}`, reporterId: me.id })),
+    });
+    const big = await loadIssueBoard(ops);
+    expect([big.items.length, big.truncated]).toEqual([1000, true]);
+    expect(Math.min(...big.items.map((i) => i.number))).toBe(3);
+  });
+});
+
+describe('페이지 경계(T-6)', () => {
+  it.each([
+    [PAGE_SIZE, 1, PAGE_SIZE],
+    [PAGE_SIZE + 1, 2, 1],
+  ])('%i건이면 %i쪽, 마지막 쪽 %i건', async (n, pages, last) => {
+    await prisma.issue.createMany({ data: Array.from({ length: n }, (_, i) => ({ projectId: erp, number: i + 1, title: `t${i}`, reporterId: me.id })) });
+    const r = await listIssues({ kind: 'project', projectId: erp }, q({ page: pages }));
+    expect([r.pageCount, r.page, r.items.length, r.total]).toEqual([pages, pages, last, n]);
+  });
+});
+
+describe('상세 댓글 최근 200건(F8)', () => {
+  it('201건이면 최근 200건(작성 순)과 생략 1건, 댓글 수는 지운 것 제외', async () => {
+    const i = await add();
+    const base = Date.parse('2026-11-01T00:00:00Z');
+    await prisma.comment.createMany({
+      data: Array.from({ length: 201 }, (_, k) => ({
+        issueId: i.id,
+        authorId: me.id,
+        body: `c${k}`,
+        createdAt: new Date(base + k * 1000),
+        updatedAt: new Date(base + k * 1000),
+        deletedAt: k === 200 ? new Date() : null,
+      })),
+    });
+    const d = (await getIssueDetail('ERP-1'))!;
+    expect(d.comments).toHaveLength(200);
+    expect([d.comments[0].body, d.comments[198].body, d.comments[199].body]).toEqual(['c1', 'c199', null]);
+    expect([d.olderCommentCount, d.commentCount]).toEqual([1, 200]);
   });
 });

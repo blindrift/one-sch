@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import { AppShell } from '@/components/app-shell';
-import { IssueDetailPanel } from '@/components/issues/issue-detail-panel';
+import { IssueDetailPanel, IssueNotFoundPanel } from '@/components/issues/issue-detail-panel';
 import { ProjectTabs, ProjectTitle } from '@/components/project-header';
 import { todayInSeoul } from '@/lib/dates';
 import type { SearchParams } from '@/lib/list-query';
@@ -29,7 +29,7 @@ export default async function ProjectBoardPage({ params, searchParams }: { param
     body = <TaskBoard project={project} data={data} canEdit={canEdit} includeParents={includeParents} />;
   } else {
     const issueKey = typeof sp.issue === 'string' ? sp.issue : null;
-    const [issues, detail, users, taskOptions] = await Promise.all([
+    const [board, detail, users, taskOptions] = await Promise.all([
       loadIssueBoard(project.id),
       issueKey ? getIssueDetail(issueKey, project.id) : null,
       listUserOptions(),
@@ -37,8 +37,12 @@ export default async function ProjectBoardPage({ params, searchParams }: { param
     ]);
     body = (
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <IssueBoard issues={issues} canEdit={canEdit} today={todayInSeoul()} />
-        {detail ? <IssueDetailPanel detail={detail} me={me} users={users} taskOptions={taskOptions} closeHref={`${basePath}?kind=issue`} /> : null}
+        <IssueBoard issues={board.items} truncated={board.truncated} canEdit={canEdit} today={todayInSeoul()} />
+        {detail ? (
+          <IssueDetailPanel detail={detail} me={me} users={users} taskOptions={taskOptions} closeHref={`${basePath}?kind=issue`} />
+        ) : issueKey ? (
+          <IssueNotFoundPanel closeHref={`${basePath}?kind=issue`} />
+        ) : null}
       </div>
     );
   }
