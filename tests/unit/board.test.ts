@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boardTasks, compareIssueCards, issueColumns, moveCard, taskColumns, compareTaskCards } from '@/lib/board';
+import { boardTasks, compareIssueCards, issueColumns, taskColumns } from '@/lib/board';
 import type { TaskDto } from '@/lib/schedule/dto';
 
 const task = (id: string, patch: Partial<TaskDto> = {}): TaskDto => ({
@@ -50,20 +50,6 @@ describe('보드 열 계산', () => {
     expect(cols.OPEN.map((c) => c.id)).toEqual(['w', 'z', 'y', 'x']);
     expect(cols.CLOSED.map((c) => c.id)).toEqual(['v']);
     expect(cols.RESOLVED).toEqual([]);
-  });
-
-  it('moveCard: 원래 열에서 빼고 새 열에 정렬 위치로, 상태도 바꾼다. 같은 열·없는 카드는 그대로', () => {
-    const cols = taskColumns([task('a', { endDate: '2026-11-09' }), task('b', { status: 'DONE', endDate: '2026-11-01' }), task('c', { status: 'DONE', endDate: '2026-11-20' })], false);
-    const moved = moveCard(cols, 'a', 'DONE', compareTaskCards);
-    expect(moved.TODO).toEqual([]);
-    expect(moved.DONE.map((t) => [t.id, t.status])).toEqual([
-      ['b', 'DONE'],
-      ['a', 'DONE'],
-      ['c', 'DONE'],
-    ]);
-    expect(cols.TODO.map((t) => t.id)).toEqual(['a']);
-    expect(moveCard(cols, 'a', 'TODO', compareTaskCards)).toBe(cols);
-    expect(moveCard(cols, 'zz', 'DONE', compareTaskCards)).toBe(cols);
   });
 
   it('compareIssueCards 는 프로젝트가 다르면 키 순', () => {

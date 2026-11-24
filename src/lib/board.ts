@@ -44,23 +44,3 @@ export function taskColumns(tasks: readonly TaskDto[], includeParents: boolean):
 export function issueColumns<C extends IssueCardLike>(issues: readonly C[]): BoardColumns<IssueStatus, C> {
   return group(ISSUE_STATUSES, issues, compareIssueCards);
 }
-
-/**
- * 카드를 다른 열로 옮긴 결과(낙관적 이동용). 원래 열에서 빼고 새 열에 정렬 순서대로 넣는다.
- * 카드가 없거나 같은 열이면 그대로 돌려준다(같은 객체).
- */
-export function moveCard<S extends string, C extends { id: string; status: S }>(
-  cols: BoardColumns<S, C>,
-  id: string,
-  to: NoInfer<S>,
-  compare: (a: C, b: C) => number,
-): BoardColumns<S, C> {
-  const from = (Object.keys(cols) as S[]).find((s) => cols[s].some((c) => c.id === id));
-  if (!from || from === to || !cols[to]) return cols;
-  const card = cols[from].find((c) => c.id === id)!;
-  return {
-    ...cols,
-    [from]: cols[from].filter((c) => c.id !== id),
-    [to]: [...cols[to], { ...card, status: to }].sort(compare),
-  };
-}
