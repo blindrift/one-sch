@@ -262,7 +262,23 @@ erDiagram
 | dueDate | date null | |
 | version | int | 낙관적 잠금 |
 
+- 번호(`number`)는 프로젝트별 일련번호다. 이슈를 만들 때 프로젝트 잠금(advisory xact lock) 안에서 `Project.issueSeq` 를 1 올려 그 값을 쓴다(빈 번호 재사용 없음, 이슈를 지워도 번호는 돌아오지 않음). 이 증가는 프로젝트 편집이 아니므로 `Project.version` 은 올리지 않는다(D22). `(projectId, number)` unique.
+- 화면 표기는 `KEY-번호`(예: `ERP-12`). 상세 패널 URL 은 `?issue=ERP-12`, 검색창에 `ERP-12` 를 넣으면 번호로 찾는다.
+- 제목 1–200자, 설명 20,000자 이하(0005 CHECK). 담당자는 활성 사용자만(D8), 보고자는 만든 사람. 연결 작업(`taskId`)은 같은 프로젝트의 작업만(다른 프로젝트 id 는 VALIDATION). 연결된 작업을 지우면 `taskId` 는 NULL(FK SetNull).
+- 보관된 프로젝트의 이슈·댓글은 읽기 전용이다: 이슈 생성·수정·삭제·보드 이동·댓글 작성·수정·삭제 모두 CONFLICT `archived`(D18, D6 확장).
+- 이슈 삭제는 MEMBER 이상이 실제 삭제한다. 댓글은 DB cascade 로 함께 지워지고, 감사 `issue.delete` before 에 이슈 스냅샷과 댓글 수를 남긴다(D21).
+- 쓰기는 `version` 낙관적 잠금. 바뀐 필드가 없으면 감사·version 변경 없음.
+
 **Comment**: `id, issueId, authorId, body(마크다운), createdAt, updatedAt, deletedAt`
+- 본문 1–20,000자(0005 CHECK). VIEWER 이상 누구나 작성, 수정은 작성자 본인만, 삭제는 작성자 본인 또는 ADMIN(D21).
+- 삭제는 `deletedAt` 소프트 삭제다. 지운 댓글은 화면에 "삭제된 댓글"로만 남고 본문은 내려보내지 않는다. 지운 댓글은 수정할 수 없다(NOT_FOUND).
+- 수정은 version 없이 마지막 저장이 이긴다(작성자 한 사람만 고칠 수 있어 충돌 위험이 작다).
+- 감사: `comment.create`·`comment.update`(본문 전후)·`comment.delete`.
+
+**마크다운(이슈 설명·댓글)**: `react-markdown` + `remark-gfm`(표·체크리스트·취소선) 서버 컴포넌트 렌더(D23).
+- raw HTML 은 렌더하지 않는다(`skipHtml`, `rehype-raw` 금지, `dangerouslySetInnerHTML` 금지 — 정적 검사).
+- 링크는 `http:`·`https:`·`mailto:` 만 남기고 나머지(`javascript:`·`data:`·`vbscript:` 와 그 변형)는 지운다. 링크는 새 창(`target=_blank`, `rel="noopener noreferrer nofollow"`).
+- 이미지는 그리지 않고 링크로 바꾼다(CSP `img-src` 가 self·data·구글 프로필만 허용하므로 외부 이미지를 열지 않는다).
 
 **AuditLog**
 | 컬럼 | 타입 | 설명 |
@@ -304,9 +320,14 @@ erDiagram
 - 작업이 없는 프로젝트는 프로젝트 기간이 있으면 그 기간으로 요약 막대를 그리고, 없으면 막대 없이 행만 둔다(D16).
 - 보관된 프로젝트는 기본으로 숨기고, "보관 포함" 토글을 켜면 읽기 전용으로 보인다(D6).
 - 필터(프로젝트·담당자·상태)와 줌은 URL query 에 보관한다. VIEWER 에게는 읽기 전용으로 보인다.
-- 작업 추가·수정은 대화상자로 한다(행 더블클릭 → 수정). 행 순서 드래그와 간트 라이브러리 내장 편집기는 쓰지 않는다(D10). 새 작업의 `sortOrder` 는 프로젝트 안 `max+1`.
+- 작업 추가·수정은 대화상자로 한다(행 더블클릭 → 수정). 간트 표의 행 드래그와 간트 라이브러리 내장 편집기는 쓰지 않는다(D10). 행 순서는 프로젝트의 목록 탭에서 바꾼다(D17): 정렬이 "순서"이고 필터·검색이 없을 때만, 같은 상위 아래 형제끼리 끌어 옮긴다. 간트는 새로고침하면 바뀐 순서로 보인다. 새 작업의 `sortOrder` 는 프로젝트 안 `max+1`.
 - 날짜는 서버·DTO 모두 `YYYY-MM-DD` 문자열(포함 종료일)이고, 간트 라이브러리(배타 종료일, 로컬 자정)와의 변환은 한 모듈(`src/components/gantt/adapter.ts`)에서만 한다.
-- `/projects/[key]` 는 2단계에서 간트 탭만 둔다(타임라인 컴포넌트를 그 프로젝트로 필터, D9). 보드·목록·이슈 탭은 3단계.
+- `/projects/[key]` 는 탭 4개다(D9): 간트(`/projects/[key]`, 타임라인 컴포넌트를 그 프로젝트로 필터), 보드(`/board`), 목록(`/list`), 이슈(`/issues`). 탭은 링크(`aria-current`)이고 없는 키는 404.
+
+### 6.1.1 보드·목록·이슈 (3단계)
+- **보드**: 상태 열(작업: 할 일·진행 중·막힘·완료, 이슈: 열림·진행 중·해결·닫힘). `?kind=issue` 로 작업|이슈 전환. 작업 보드는 기본으로 하위가 없는 작업과 마일스톤만 보이고 "상위 작업 포함" 토글(`?parents=1`)로 상위도 보인다. 열 안 순서는 종료일(이슈는 마감일, 없으면 뒤) 순(D20). 카드를 다른 열로 끌면(마우스·키보드) 화면을 먼저 옮기고 `updateTask`/`updateIssue({id, version, status})` 로 저장, 실패하면 되돌리고 사유를 보이며 CONFLICT·NOT_FOUND 면 최신 값을 다시 읽는다. VIEWER·보관 프로젝트는 끌 수 없다. 카드를 누르면 작업은 작업 대화상자, 이슈는 상세 패널.
+- **목록**: 작업 표(서버 렌더). 정렬(순서·제목·시작·종료·진행률·상태)·필터(상태·담당자)·검색(제목)·페이지(50건)를 URL query 에 둔다. 지연 표시, 상위 경로 표시. MEMBER 는 행을 눌러 작업 대화상자로 수정(보관 제외). 정렬이 "순서"이고 필터·검색이 없을 때 행 순서를 끌어 바꾼다(D17, `reorderTask`).
+- **이슈 탭·`/issues`**: 이슈 목록(필터: 상태·유형·우선순위·담당자, `/issues` 는 프로젝트도; 정렬·검색·페이지 50건), 상세 패널(`?issue=KEY-n`, 새로고침해도 유지), 댓글, 이슈 추가·수정·삭제 대화상자(MEMBER).
 
 ### 6.2 대시보드 정의
 - 지연 작업: `endDate < 오늘 AND status != DONE`
@@ -562,6 +583,20 @@ export async function updateTask(input: unknown): Promise<ActionResult<TaskDto>>
 | 배포 리허설 | docker compose (linux/amd64) | DB 포트 미노출 확인, healthcheck, 백업 → 새 DB 복구 |
 
 완료 기준: 모든 테스트 통과, trivy HIGH/CRITICAL 0, 리뷰(oneteam 보안·로직·테스트 리뷰어)에서 Critical/High 미해결 0.
+
+---
+
+### 11.1 3단계 결정(D17–D23, 2026-11-24 승인)
+
+| # | 결정 |
+|---|---|
+| D17 | D10 개정: 간트 표 행 드래그는 계속 쓰지 않고, 행 순서는 목록 탭에서만 바꾼다(정렬 "순서"·필터·검색 없음, 같은 상위의 형제끼리). 새 액션 `reorderTask({id, version, beforeId|afterId})`(MEMBER): 프로젝트 잠금 안에서 형제 `sortOrder` 를 다시 매기고 대상 version+1, 감사 `task.reorder`(parentId, 전후 형제 순서). 다른 상위의 작업을 기준으로 주면 VALIDATION. 간트는 새로고침하면 반영 |
+| D18 | 보관 프로젝트의 이슈·댓글은 읽기 전용(생성·수정·삭제·보드 이동·댓글 쓰기 모두 CONFLICT `archived`, D6 확장) |
+| D19 | 새 의존성은 정확한 버전 고정: `@dnd-kit/core` 6.3.1, `@dnd-kit/sortable` 10.0.0, `@dnd-kit/utilities` 3.2.2, `react-markdown` 10.1.0, `remark-gfm` 4.0.1. 설치 후 `npm audit --omit=dev` 0건 |
+| D20 | 보드 기본 범위는 하위가 없는 작업과 마일스톤, "상위 작업 포함" 토글. 열 안 순서는 종료일 순 |
+| D21 | 댓글: VIEWER 도 작성·본인 댓글 수정·삭제, ADMIN 은 남의 댓글 삭제. 이슈 삭제는 MEMBER 가 실제 삭제(댓글 cascade), 감사 before 에 스냅샷과 댓글 수 |
+| D22 | 이슈 번호는 프로젝트 잠금 안에서 `Project.issueSeq` 증가로 발급, `Project.version` 은 올리지 않는다 |
+| D23 | 마크다운은 서버 컴포넌트에서만 렌더, raw HTML·이미지 미렌더, 링크는 http/https/mailto 만 |
 
 ---
 
