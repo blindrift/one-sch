@@ -1,6 +1,6 @@
 'use client';
 
-import { ChartGantt, FolderKanban, Users } from 'lucide-react';
+import { ChartGantt, CircleDot, FolderKanban, Users } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from 'cn';
@@ -20,6 +20,7 @@ export function SidebarNav({ isAdmin, projects }: { isAdmin: boolean; projects: 
   const menu = [
     { href: '/timeline', label: '타임라인', icon: ChartGantt, active: pathname === '/timeline' },
     { href: '/projects', label: '프로젝트', icon: FolderKanban, active: pathname === '/projects' },
+    { href: '/issues', label: '이슈', icon: CircleDot, active: pathname === '/issues' },
     ...(isAdmin ? [{ href: '/admin/users', label: '사용자 관리', icon: Users, active: pathname.startsWith('/admin/users') }] : []),
   ];
 
@@ -39,7 +40,8 @@ export function SidebarNav({ isAdmin, projects }: { isAdmin: boolean; projects: 
           {projects.length === 0 ? <li className="px-2.5 py-1 text-xs text-text-subtle">활성 프로젝트가 없습니다.</li> : null}
           {projects.map((p) => {
             const href = `/projects/${p.key}`;
-            const active = pathname === href;
+            // 프로젝트의 모든 탭(/board·/list·/issues)에서 활성. 키가 앞부분만 같은 다른 프로젝트(AB·ABC)는 제외
+            const active = pathname === href || pathname.startsWith(`${href}/`);
             return (
               <li key={p.key}>
                 <Link href={href} aria-current={active ? 'page' : undefined} className={cn(ITEM, active ? ACTIVE : IDLE)} title={`[${p.key}] ${p.name}`}>

@@ -11,5 +11,9 @@ export const PAGE_POLICY: Record<string, PagePolicy> = {
   'src/app/(main)/timeline/page.tsx': { min: 'VIEWER' },
   'src/app/(main)/projects/page.tsx': { min: 'VIEWER' },
   'src/app/(main)/projects/[key]/page.tsx': { min: 'VIEWER' },
+  'src/app/(main)/projects/[key]/board/page.tsx': { min: 'VIEWER' },
+  'src/app/(main)/projects/[key]/list/page.tsx': { min: 'VIEWER' },
+  'src/app/(main)/projects/[key]/issues/page.tsx': { min: 'VIEWER' },
+  'src/app/(main)/issues/page.tsx': { min: 'VIEWER' },
   'src/app/admin/users/page.tsx': { min: 'ADMIN' },
 };
