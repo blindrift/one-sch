@@ -7,7 +7,7 @@ type Captured = {
   providers: Array<{ profile: (p: Record<string, unknown>) => Record<string, unknown>; allowDangerousEmailAccountLinking: boolean; checks: string[] }>;
   pages: Record<string, string>;
   callbacks: {
-    signIn: (a: { account: unknown; profile: unknown }) => Promise<boolean>;
+    signIn: (a: { account: unknown; profile: unknown }) => Promise<boolean | string>;
     session: (a: { session: { expires: string }; user: Record<string, unknown> }) => unknown;
   };
   events: { signOut: (m: unknown) => Promise<void>; signIn: (m: unknown) => Promise<void> };
@@ -70,13 +70,26 @@ describe('Auth.js 설정', () => {
   });
 
   it('signIn 콜백이 등록 사용자 가드에 연결돼 있다', async () => {
-    db.user.findUnique.mockResolvedValue({ id: 'u1', active: true });
+    db.user.findUnique.mockResolvedValue({ id: 'u1', active: true, approval: 'APPROVED' });
     db.account.findUnique.mockResolvedValue(null);
     const profile = { email: 'a@example.com', email_verified: true };
     expect(await c().callbacks.signIn({ account: { provider: 'google', providerAccountId: 's1' }, profile })).toBe(true);
-    db.user.findUnique.mockResolvedValue(null);
+    db.user.findUnique.mockResolvedValue({ id: 'u1', active: true, approval: 'APPROVED' });
+    db.user.findUnique.mockResolvedValueOnce({ id: 'u1', active: false, approval: 'APPROVED' });
     expect(await c().callbacks.signIn({ account: { provider: 'google', providerAccountId: 's1' }, profile })).toBe(false);
     expect(writeAudit).toHaveBeenCalledWith(db, expect.objectContaining({ action: 'auth.login.denied' }));
+  });
+
+  it('미등록 구글 로그인은 같은 트랜잭션에서 가입 신청(PENDING·비활성)과 감사를 남기고 승인 대기로 보낸다', async () => {
+    const tx = { user: { create: vi.fn(async () => ({ id: 'n1', approval: 'PENDING' })) } };
+    db.$transaction.mockImplementation(async (fn: (t: unknown) => unknown) => fn(tx));
+    db.user.findUnique.mockResolvedValue(null);
+    const profile = { email: 'New@example.com', email_verified: true, name: '새사람' };
+    expect(await c().callbacks.signIn({ account: { provider: 'google', providerAccountId: 's9' }, profile })).toBe('/login?error=pending');
+    expect(tx.user.create).toHaveBeenCalledWith({
+      data: { email: 'new@example.com', name: '새사람', image: null, role: 'VIEWER', active: false, approval: 'PENDING' },
+    });
+    expect(writeAudit).toHaveBeenCalledWith(tx, expect.objectContaining({ action: 'user.signup.request', entityId: 'n1' }));
   });
 
   it('session 콜백은 id·name·email·role 만 내보낸다', () => {

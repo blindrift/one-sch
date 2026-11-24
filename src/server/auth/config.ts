@@ -1,4 +1,5 @@
 import 'server-only';
+import { Prisma } from '@prisma/client';
 import NextAuth from 'next-auth';
 import Google from 'next-auth/providers/google';
 import { writeAudit } from '../audit';
@@ -19,13 +20,35 @@ async function safeMeta() {
 }
 
 export const googleSignInGuard = createGoogleSignInGuard({
-  findUserByEmail: (email) => prisma.user.findUnique({ where: { email }, select: { id: true, active: true } }),
+  findUserByEmail: (email) => prisma.user.findUnique({ where: { email }, select: { id: true, active: true, approval: true } }),
   findUserByAccount: async (provider, providerAccountId) => {
     const account = await prisma.account.findUnique({
       where: { provider_providerAccountId: { provider, providerAccountId } },
       select: { user: { select: { id: true, active: true, email: true } } },
     });
     return account?.user ?? null;
+  },
+  requestSignup: async ({ email, name, image }) => {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const user = await tx.user.create({ data: { email, name, image, role: 'VIEWER', active: false, approval: 'PENDING' } });
+        await writeAudit(tx, {
+          action: 'user.signup.request',
+          entity: 'User',
+          entityId: user.id,
+          after: { provider: 'google', email, name },
+          meta: await safeMeta(),
+        });
+        return user.approval;
+      });
+    } catch (err) {
+      // 같은 이메일로 동시에 들어온 경우: 먼저 만들어진 행의 상태를 따른다.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        const existing = await prisma.user.findUnique({ where: { email }, select: { approval: true } });
+        if (existing) return existing.approval;
+      }
+      throw err;
+    }
   },
   recordDenied: async ({ email, reason }) => {
     await writeAudit(prisma, {

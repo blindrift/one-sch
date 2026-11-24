@@ -35,7 +35,7 @@ export default function PrivacyPage() {
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold tracking-tight text-foreground">2. 이용 목적</h2>
         <ul className="list-disc space-y-1 pl-5">
-          <li>허용된 사용자인지 확인하고 로그인 상태를 유지하기 위해</li>
+          <li>가입 신청을 받고, 승인된 사용자인지 확인하고, 로그인 상태를 유지하기 위해</li>
           <li>작업 담당자 표시 등 서비스 기능을 제공하기 위해</li>
           <li>무단 접근을 막고, 문제가 생겼을 때 변경 이력을 확인하기 위해</li>
         </ul>

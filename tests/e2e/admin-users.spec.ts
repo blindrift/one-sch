@@ -97,3 +97,42 @@ test('유일한 활성 관리자는 자기 역할·활성 상태를 바꿀 수 �
   expect(me).toMatchObject({ role: 'ADMIN', active: true });
   expect(await ownerDb.user.count({ where: { role: 'ADMIN', active: true } })).toBe(1);
 });
+
+test('가입 승인 대기: 역할 골라 승인 / 거부 → 거부 목록에서 삭제, 로그인 화면 안내', async ({ page, context }) => {
+  const operator = await ownerDb.user.create({ data: { email: 'ops2@example.com', name: '운영자2', role: 'ADMIN' } });
+  const a = await ownerDb.user.create({ data: { email: 'apply-a@example.com', name: '신청가', active: false, approval: 'PENDING' } });
+  const b = await ownerDb.user.create({ data: { email: 'apply-b@example.com', name: '신청나', active: false, approval: 'PENDING' } });
+
+  // 로그인 화면 안내(구글 콜백이 보내는 주소)
+  await page.goto('/login?error=pending');
+  await expect(page.getByTestId('login-pending')).toContainText('가입 신청이 접수되었습니다');
+  await page.goto('/login?error=rejected');
+  await expect(page.getByTestId('login-rejected')).toContainText('가입이 거부된 계정');
+
+  await injectSession(context, operator.id);
+  await gotoReady(page, '/admin/users');
+  const box = page.getByTestId('pending-signups');
+  await expect(box).toContainText('가입 승인 대기');
+  await expect(page.getByTestId('user-row-apply-a@example.com')).toHaveCount(0); // 대기 중은 아래 표에 없다
+
+  // 승인: 멤버로
+  const rowA = page.getByTestId('pending-row-apply-a@example.com');
+  await rowA.getByRole('combobox', { name: '신청가 승인 역할' }).click();
+  await page.getByRole('option', { name: '멤버' }).click();
+  await rowA.getByRole('button', { name: '승인' }).click();
+  await expect(page.getByTestId('user-row-apply-a@example.com')).toBeVisible();
+  expect(await ownerDb.user.findUniqueOrThrow({ where: { id: a.id } })).toMatchObject({ approval: 'APPROVED', active: true, role: 'MEMBER' });
+
+  // 거부 → 표에 "가입 거부" 로 남고, 삭제할 수 있다
+  await page.getByTestId('pending-row-apply-b@example.com').getByRole('button', { name: '거부' }).click();
+  await expect(box).toHaveCount(0);
+  const rowB = page.getByTestId('user-row-apply-b@example.com');
+  await expect(rowB.getByText('가입 거부')).toBeVisible();
+  expect((await ownerDb.user.findUniqueOrThrow({ where: { id: b.id } })).approval).toBe('REJECTED');
+  await rowB.getByRole('button', { name: '신청나 작업' }).click();
+  await page.getByRole('menuitem', { name: '삭제' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: '삭제' }).click();
+  await expect(rowB).toHaveCount(0);
+  expect(await ownerDb.user.findUnique({ where: { id: b.id } })).toBeNull();
+  expect(await auditActions()).toEqual(expect.arrayContaining(['user.signup.approve', 'user.signup.reject', 'user.delete']));
+});

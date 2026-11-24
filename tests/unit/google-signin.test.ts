@@ -1,15 +1,28 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createGoogleSignInGuard, emailFromIdToken } from '@/server/auth/google';
+import {
+  createGoogleSignInGuard,
+  emailFromIdToken,
+  SIGNUP_PENDING_URL,
+  SIGNUP_REJECTED_URL,
+  type Approval,
+} from '@/server/auth/google';
 
 type Linked = { id: string; active: boolean; email: string | null };
 
-function setup(users: Record<string, { id: string; active: boolean }>, linked: Record<string, Linked> = {}) {
-  const findUserByEmail = vi.fn(async (email: string) => users[email] ?? null);
+type U = { id: string; active: boolean; approval?: Approval };
+
+function setup(users: Record<string, U>, linked: Record<string, Linked> = {}, signupResult: Approval = 'PENDING') {
+  const findUserByEmail = vi.fn(async (email: string) => {
+    const u = users[email];
+    return u ? { approval: 'APPROVED' as Approval, ...u } : null;
+  });
+  const requestSignup = vi.fn<(info: { email: string; name: string; image: string | null }) => Promise<Approval>>(async () => signupResult);
   const findUserByAccount = vi.fn(async (_provider: string, sub: string) => linked[sub] ?? null);
   const recordDenied = vi.fn(async () => {});
   return {
-    guard: createGoogleSignInGuard({ findUserByEmail, findUserByAccount, recordDenied }),
+    guard: createGoogleSignInGuard({ findUserByEmail, findUserByAccount, recordDenied, requestSignup }),
     findUserByEmail,
+    requestSignup,
     findUserByAccount,
     recordDenied,
   };
@@ -24,10 +37,40 @@ describe('googleSignInGuard', () => {
     expect(recordDenied).not.toHaveBeenCalled();
   });
 
-  it('미등록은 거부하고 감사 기록', async () => {
-    const { guard, recordDenied } = setup({});
-    expect(await guard(google, { email: 'x@example.com', email_verified: true })).toBe(false);
-    expect(recordDenied).toHaveBeenCalledWith({ email: 'x@example.com', reason: 'not_registered' });
+  it('미등록은 가입 신청(PENDING)을 만들고 승인 대기 안내로 보낸다', async () => {
+    const { guard, recordDenied, requestSignup } = setup({});
+    expect(
+      await guard(google, { email: 'X@example.com', email_verified: true, name: ' 홍길동 ', picture: 'https://img/p.png' }),
+    ).toBe(SIGNUP_PENDING_URL);
+    expect(requestSignup).toHaveBeenCalledWith({ email: 'x@example.com', name: '홍길동', image: 'https://img/p.png' });
+    expect(recordDenied).toHaveBeenCalledWith({ email: 'x@example.com', reason: 'pending' });
+  });
+
+  it('가입 신청 이름이 없으면 이메일 앞부분', async () => {
+    const { guard, requestSignup } = setup({});
+    await guard(google, { email: 'kim@example.com', email_verified: true });
+    expect(requestSignup).toHaveBeenCalledWith({ email: 'kim@example.com', name: 'kim', image: null });
+  });
+
+  it('동시 신청으로 이미 거부·승인된 행이면 그 상태를 따른다', async () => {
+    expect(await setup({}, {}, 'REJECTED').guard(google, { email: 'x@example.com', email_verified: true })).toBe(SIGNUP_REJECTED_URL);
+    expect(await setup({}, {}, 'APPROVED').guard(google, { email: 'x@example.com', email_verified: true })).toBe(false);
+  });
+
+  it('승인 대기·거부 계정은 새 신청 없이 안내로 보낸다', async () => {
+    const p = setup({ 'p@example.com': { id: '1', active: false, approval: 'PENDING' } });
+    expect(await p.guard(google, { email: 'p@example.com', email_verified: true })).toBe(SIGNUP_PENDING_URL);
+    expect(p.requestSignup).not.toHaveBeenCalled();
+    const r = setup({ 'r@example.com': { id: '2', active: false, approval: 'REJECTED' } });
+    expect(await r.guard(google, { email: 'r@example.com', email_verified: true })).toBe(SIGNUP_REJECTED_URL);
+    expect(r.requestSignup).not.toHaveBeenCalled();
+    expect(r.recordDenied).toHaveBeenCalledWith({ email: 'r@example.com', reason: 'rejected' });
+  });
+
+  it('email_verified 가 아니면 가입 신청도 만들지 않는다', async () => {
+    const { guard, requestSignup } = setup({});
+    expect(await guard(google, { email: 'x@example.com', email_verified: false })).toBe(false);
+    expect(requestSignup).not.toHaveBeenCalled();
   });
 
   it('비활성은 거부', async () => {

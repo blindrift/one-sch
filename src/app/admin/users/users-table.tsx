@@ -23,6 +23,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ROLES, ROLE_LABELS, type Role } from '@/lib/roles';
 import {
+  approveUser,
+  deleteUnapprovedUser,
   resetUserPassword,
   revokeUserSessions,
   setUserActive,
@@ -38,6 +40,7 @@ export function UsersTable({ users, currentUserId }: { users: UserRow[]; current
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
   const [tempPassword, setTempPassword] = useState<{ name: string; value: string } | null>(null);
+  const [toDelete, setToDelete] = useState<UserRow | null>(null);
 
   function run<T>(fn: () => Promise<ActionResult<T>>, onOk?: (data: T) => void) {
     startTransition(async () => {
@@ -75,6 +78,7 @@ export function UsersTable({ users, currentUserId }: { users: UserRow[]; current
           {users.map((u) => {
             const locked = u.lockedUntil !== null && new Date(u.lockedUntil).getTime() > Date.now();
             const isMe = u.id === currentUserId;
+            const rejected = u.approval === 'REJECTED';
             return (
               <TableRow key={u.id} data-testid={`user-row-${u.email ?? u.username}`}>
                 <TableCell className="pl-4">
@@ -108,7 +112,11 @@ export function UsersTable({ users, currentUserId }: { users: UserRow[]; current
                 </TableCell>
                 <TableCell>
                   <span className="inline-flex gap-1">
-                  {u.active ? (
+                  {rejected ? (
+                    <Badge variant="outline" className="border-destructive/40 text-destructive">
+                      가입 거부
+                    </Badge>
+                  ) : u.active ? (
                     <Badge variant="secondary" className="gap-1.5 bg-[color-mix(in_srgb,var(--status-done)_12%,transparent)] text-status-done">
                       <span className="size-1.5 rounded-full bg-status-done" aria-hidden />
                       활성
@@ -132,13 +140,24 @@ export function UsersTable({ users, currentUserId }: { users: UserRow[]; current
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                      {rejected ? (
+                        <>
+                          <DropdownMenuItem onSelect={() => run(() => approveUser({ userId: u.id, role: u.role }))}>
+                            {ROLE_LABELS[u.role]}(으)로 승인
+                          </DropdownMenuItem>
+                          <DropdownMenuItem variant="destructive" onSelect={() => setToDelete(u)}>
+                            삭제
+                          </DropdownMenuItem>
+                        </>
+                      ) : (
                       <DropdownMenuItem onSelect={() => run(() => revokeUserSessions({ userId: u.id }))}>
                         세션 종료
                       </DropdownMenuItem>
+                      )}
                       {locked ? (
                         <DropdownMenuItem onSelect={() => run(() => unlockUser({ userId: u.id }))}>잠금 해제</DropdownMenuItem>
                       ) : null}
-                      {!isMe ? (
+                      {!isMe && !rejected ? (
                         <DropdownMenuItem onSelect={() => run(() => setUserActive({ userId: u.id, active: !u.active }))}>
                           {u.active ? '비활성화' : '활성화'}
                         </DropdownMenuItem>
@@ -164,6 +183,33 @@ export function UsersTable({ users, currentUserId }: { users: UserRow[]; current
         </TableBody>
       </Table>
       </div>
+
+      <Dialog open={toDelete !== null} onOpenChange={(v) => !v && setToDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>가입 거부 계정 삭제</DialogTitle>
+            <DialogDescription>
+              {toDelete?.name}({toDelete?.email}) 계정을 삭제합니다. 삭제하면 이 이메일로 다시 로그인할 때 새 가입 신청이 생깁니다.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setToDelete(null)}>
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={pending}
+              onClick={() => {
+                const target = toDelete;
+                setToDelete(null);
+                if (target) run(() => deleteUnapprovedUser({ userId: target.id }));
+              }}
+            >
+              삭제
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={tempPassword !== null} onOpenChange={(v) => !v && setTempPassword(null)}>
         <DialogContent>

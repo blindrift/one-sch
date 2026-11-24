@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import {
+  approveUserSchema,
   createUserSchema,
   setUserActiveSchema,
   updateUserRoleSchema,
@@ -71,5 +72,35 @@ export async function resetUserPassword(input: unknown): Promise<ActionResult<{ 
     const result = await users.resetUserPassword(actor, userId, await getRequestMeta());
     revalidatePath(PATH);
     return result;
+  });
+}
+
+export async function approveUser(input: unknown): Promise<ActionResult<null>> {
+  return toActionResult(async () => {
+    const actor = await requireRole('ADMIN');
+    const { userId, role } = approveUserSchema.parse(input);
+    await users.approveUser(actor, userId, role, await getRequestMeta());
+    revalidatePath(PATH);
+    return null;
+  });
+}
+
+export async function rejectUser(input: unknown): Promise<ActionResult<null>> {
+  return toActionResult(async () => {
+    const actor = await requireRole('ADMIN');
+    const { userId } = userTargetSchema.parse(input);
+    await users.rejectUser(actor, userId, await getRequestMeta());
+    revalidatePath(PATH);
+    return null;
+  });
+}
+
+export async function deleteUnapprovedUser(input: unknown): Promise<ActionResult<null>> {
+  return toActionResult(async () => {
+    const actor = await requireRole('ADMIN');
+    const { userId } = userTargetSchema.parse(input);
+    await users.deleteUnapprovedUser(actor, userId, await getRequestMeta());
+    revalidatePath(PATH);
+    return null;
   });
 }

@@ -14,6 +14,7 @@ import { deleteSessionsOfUser } from '../auth/session';
 const ADMIN_CHANGE_LOCK = 74_201_121;
 
 export type Actor = { id: string };
+export type Approval = 'PENDING' | 'APPROVED' | 'REJECTED';
 
 export type UserRow = {
   id: string;
@@ -22,6 +23,7 @@ export type UserRow = {
   name: string;
   role: Role;
   active: boolean;
+  approval: Approval;
   hasPassword: boolean;
   lockedUntil: Date | null;
   lastLoginAt: Date | null;
@@ -42,6 +44,7 @@ export async function listUsers(): Promise<UserRow[]> {
     name: u.name,
     role: u.role,
     active: u.active,
+    approval: u.approval,
     hasPassword: u.passwordHash !== null,
     lockedUntil: u.lockedUntil,
     lastLoginAt: u.lastLoginAt,
@@ -125,6 +128,9 @@ export async function setUserActive(actor: Actor, userId: string, active: boolea
   await prisma.$transaction(async (tx) => {
     await lockAdminChanges(tx, actor);
     const target = await findTarget(tx, userId);
+    if (active && target.approval !== 'APPROVED') {
+      throw new AppError('CONFLICT', 'not_approved', '가입 승인이 안 된 계정입니다. 먼저 승인해 주세요.');
+    }
     if (target.active === active) return;
     if (!active) {
       if (target.id === actor.id) throw new AppError('CONFLICT', 'self', '자기 자신은 비활성화할 수 없습니다.');
@@ -141,6 +147,73 @@ export async function setUserActive(actor: Actor, userId: string, active: boolea
       entityId: target.id,
       before: { active: target.active },
       after: { active, revokedSessions: revoked },
+      meta,
+    });
+  });
+}
+
+/** 가입 신청(PENDING)이나 거부(REJECTED)된 계정을 고른 역할로 승인하고 활성화한다. */
+export async function approveUser(actor: Actor, userId: string, role: Role, meta: RequestMeta) {
+  await prisma.$transaction(async (tx) => {
+    await lockAdminChanges(tx, actor);
+    const target = await findTarget(tx, userId);
+    if (target.approval === 'APPROVED') {
+      throw new AppError('CONFLICT', 'already_approved', '이미 승인된 계정입니다.');
+    }
+    await tx.user.update({ where: { id: target.id }, data: { approval: 'APPROVED', active: true, role } });
+    await writeAudit(tx, {
+      actorId: actor.id,
+      action: 'user.signup.approve',
+      entity: 'User',
+      entityId: target.id,
+      before: { approval: target.approval, role: target.role },
+      after: { approval: 'APPROVED', role },
+      meta,
+    });
+  });
+}
+
+/** 가입 신청을 거부한다. 행은 REJECTED 로 남겨 다시 로그인해도 새 신청이 생기지 않게 한다. */
+export async function rejectUser(actor: Actor, userId: string, meta: RequestMeta) {
+  await prisma.$transaction(async (tx) => {
+    await lockAdminChanges(tx, actor);
+    const target = await findTarget(tx, userId);
+    if (target.approval !== 'PENDING') {
+      throw new AppError('CONFLICT', 'not_pending', '승인 대기 중인 계정만 거부할 수 있습니다.');
+    }
+    await tx.user.update({ where: { id: target.id }, data: { approval: 'REJECTED', active: false } });
+    await writeAudit(tx, {
+      actorId: actor.id,
+      action: 'user.signup.reject',
+      entity: 'User',
+      entityId: target.id,
+      before: { approval: target.approval },
+      after: { approval: 'REJECTED' },
+      meta,
+    });
+  });
+}
+
+/**
+ * 승인되지 않은(대기·거부) 계정을 지운다. 지우면 그 이메일로 다시 로그인할 때 새 신청이 생긴다.
+ * 승인된 계정은 작업·감사 기록과 얽혀 있으므로 지우지 않고 비활성화한다.
+ */
+export async function deleteUnapprovedUser(actor: Actor, userId: string, meta: RequestMeta) {
+  await prisma.$transaction(async (tx) => {
+    await lockAdminChanges(tx, actor);
+    const target = await findTarget(tx, userId);
+    if (target.approval === 'APPROVED') {
+      throw new AppError('CONFLICT', 'approved', '승인된 계정은 삭제할 수 없습니다. 비활성화해 주세요.');
+    }
+    await tx.account.deleteMany({ where: { userId: target.id } });
+    await tx.session.deleteMany({ where: { userId: target.id } });
+    await tx.user.delete({ where: { id: target.id } });
+    await writeAudit(tx, {
+      actorId: actor.id,
+      action: 'user.delete',
+      entity: 'User',
+      entityId: target.id,
+      before: { email: target.email, name: target.name, approval: target.approval },
       meta,
     });
   });

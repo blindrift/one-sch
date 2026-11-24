@@ -13,6 +13,7 @@ export const createUserSchema = z.object({
 
 export const updateUserRoleSchema = z.object({ userId, role: z.enum(ROLES) });
 export const setUserActiveSchema = z.object({ userId, active: z.boolean() });
+export const approveUserSchema = z.object({ userId, role: z.enum(ROLES) });
 export const userTargetSchema = z.object({ userId });
 
 export type CreateUserInput = z.infer<typeof createUserSchema>;

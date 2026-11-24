@@ -14,6 +14,14 @@ enum Role {
   VIEWER
 }
 
+/// 가입 상태. 구글 첫 로그인은 PENDING 으로 만들어 관리자가 승인(APPROVED)·거부(REJECTED)한다.
+/// PENDING·REJECTED 는 항상 active=false 이다(세션·로그인·담당자 목록은 active 만 본다).
+enum UserApproval {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum ProjectStatus {
   PLANNED
   ACTIVE
@@ -66,6 +74,7 @@ model User {
   passwordHash       String?
   mustChangePassword Boolean   @default(false)
   active             Boolean   @default(true)
+  approval           UserApproval @default(APPROVED)
   failedLogins       Int       @default(0)
   lockedUntil        DateTime? @db.Timestamptz(6)
   lastLoginAt        DateTime? @db.Timestamptz(6)

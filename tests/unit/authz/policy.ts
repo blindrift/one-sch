@@ -20,6 +20,9 @@ export const ACTION_POLICY: Record<string, Policy> = {
   'user.revokeUserSessions': { min: 'ADMIN' },
   'user.unlockUser': { min: 'ADMIN' },
   'user.resetUserPassword': { min: 'ADMIN' },
+  'user.approveUser': { min: 'ADMIN' },
+  'user.rejectUser': { min: 'ADMIN' },
+  'user.deleteUnapprovedUser': { min: 'ADMIN' },
 
   'project.createProject': { min: 'MEMBER' },
   'project.updateProject': { min: 'MEMBER' },
