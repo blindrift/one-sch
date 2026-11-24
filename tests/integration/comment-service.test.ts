@@ -63,14 +63,25 @@ describe('addComment', () => {
   });
 });
 
-describe('댓글 수 상한(F8)', () => {
-  it('이슈당 1,000개(지운 것 포함)를 넘으면 VALIDATION(comment_limit), 다른 이슈는 영향 없음', async () => {
-    await prisma.comment.createMany({ data: Array.from({ length: 999 }, (_, i) => ({ issueId, authorId: member.id, body: `c${i}`, deletedAt: i % 2 ? new Date() : null })) });
-    expect(await reasonOf(comments.addComment(viewer, { issueId, body: '1000번째' }, meta))).toBe('OK');
+describe('댓글 수 상한(F8·S-6)', () => {
+  it('살아 있는 댓글 1,000개에서 막히고(comment_limit), 하나 지우면 다시 쓸 수 있다. 다른 이슈는 영향 없음', async () => {
+    await prisma.comment.createMany({ data: Array.from({ length: 999 }, (_, i) => ({ issueId, authorId: member.id, body: `c${i}` })) });
+    // 지운 댓글은 1,000개 상한에 들지 않는다
+    await prisma.comment.createMany({ data: Array.from({ length: 10 }, (_, i) => ({ issueId, authorId: member.id, body: `d${i}`, deletedAt: new Date() })) });
+    const last = await comments.addComment(viewer, { issueId, body: '1000번째' }, meta);
     expect(await reasonOf(comments.addComment(viewer, { issueId, body: '1001번째' }, meta))).toBe('VALIDATION:comment_limit');
-    expect(await prisma.comment.count({ where: { issueId } })).toBe(1000);
+    await comments.deleteComment(viewer, { id: last.id }, meta);
+    expect(await reasonOf(comments.addComment(viewer, { issueId, body: '지운 뒤 다시' }, meta))).toBe('OK');
+    expect(await prisma.comment.count({ where: { issueId, deletedAt: null } })).toBe(1000);
     const other = await issues.createIssue(member, { projectId, title: 'j', description: '', type: 'ISSUE', status: 'OPEN', priority: 'MEDIUM' }, meta);
     expect(await reasonOf(comments.addComment(viewer, { issueId: other.id, body: 'x' }, meta))).toBe('OK');
+  });
+
+  it('지운 것까지 포함한 저장 행 5,000개에서 막힌다(살아 있는 댓글이 적어도)', async () => {
+    await prisma.comment.createMany({ data: Array.from({ length: 4999 }, (_, i) => ({ issueId, authorId: member.id, body: `d${i}`, deletedAt: new Date() })) });
+    expect(await reasonOf(comments.addComment(viewer, { issueId, body: '5000번째 행' }, meta))).toBe('OK');
+    expect(await reasonOf(comments.addComment(viewer, { issueId, body: '5001번째 행' }, meta))).toBe('VALIDATION:comment_limit');
+    expect(await prisma.comment.count({ where: { issueId } })).toBe(5000);
   });
 });
 

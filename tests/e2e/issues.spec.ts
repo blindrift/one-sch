@@ -145,7 +145,10 @@ test('댓글 권한: VIEWER 는 이슈 수정 단추 없이 댓글 작성·본�
   // 지운 댓글의 원문은 DOM 에도, 새로 읽은 페이지 응답에도 없다(T-8)
   await expect(panel.getByTestId(`comment-${myRow.id}`)).not.toContainText('고친 의견');
   const reloaded = await page.reload();
-  expect(await reloaded!.text()).not.toContain('조회자 고친 의견');
+  const html = await reloaded!.text();
+  expect(html).not.toContain('조회자 고친 의견');
+  // 대조: 살아 있는 댓글 본문은 같은 응답에 있다(응답이 비어서 통과한 것이 아님)
+  expect(html).toContain('멤버 댓글');
   await expect(page.getByTestId(`comment-${myRow.id}`)).toContainText('삭제된 댓글입니다.');
   expect((await ownerDb.comment.findUniqueOrThrow({ where: { id: myRow.id } })).deletedAt).not.toBeNull();
 

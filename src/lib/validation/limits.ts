@@ -11,8 +11,12 @@ export const TASK_MEMO_MAX = 5000;
 /** 이슈 설명·댓글 본문 길이 한도(0005 마이그레이션의 CHECK 와 같은 값, 설계서 9.3) */
 export const ISSUE_DESC_MAX = 20000;
 export const COMMENT_MAX = 20000;
-/** 이슈 하나의 댓글 수 상한(지운 것 포함, 넘으면 VALIDATION)과 상세 패널에 싣는 최근 댓글 수 */
+/**
+ * 이슈 하나의 댓글 수 상한: 살아 있는 댓글 1,000개, 지운 것까지 포함한 저장 행 5,000개(넘으면 VALIDATION comment_limit).
+ * 상세 패널에는 최근 댓글 COMMENT_DETAIL_LIMIT 건만 싣는다.
+ */
 export const COMMENTS_PER_ISSUE_MAX = 1000;
+export const COMMENT_ROWS_PER_ISSUE_MAX = 5000;
 export const COMMENT_DETAIL_LIMIT = 200;
 /** 이슈 보드에 싣는 이슈 수 상한(넘으면 안내) */
 export const ISSUE_BOARD_LIMIT = 1000;

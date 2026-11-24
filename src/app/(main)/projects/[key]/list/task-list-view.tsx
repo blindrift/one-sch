@@ -58,6 +58,9 @@ export function TaskListView({
   const [reordering, startReorder] = useTransition();
   const refresh = () => router.refresh();
   const canReorder = canEdit && orderMode;
+  /** 재정렬 응답으로 받은 새 version(서버 값이 더 크면 그것을 쓴다) */
+  const [versions, setVersions] = useState<Record<string, number>>({});
+  const versionOf = (r: { id: string; version: number }) => Math.max(r.version, versions[r.id] ?? -1);
   /** 저장 중에는 끌 수 없다(옛 version·순서로 다시 옮기지 않게). 손잡이는 남겨 둔다 */
   const dragLocked = !canReorder || reordering;
   const titleOf = (id: string) => rows.find((r) => r.id === id)?.title ?? '';
@@ -86,9 +89,12 @@ export function TaskListView({
       return;
     }
     startReorder(async () => {
-      const r = await reorderTask({ id: moving.id, version: moving.version, ...(from < to ? { afterId: anchorId } : { beforeId: anchorId }) });
+      const r = await reorderTask({ id: moving.id, version: versionOf(moving), ...(from < to ? { afterId: anchorId } : { beforeId: anchorId }) });
       setMessage(r.ok ? null : r.message);
-      refresh();
+      // 새 version 을 바로 기억해 둔다(다시 읽기가 오기 전에 또 옮겨도 옛 version 으로 보내지 않게)
+      if (r.ok) setVersions((v) => ({ ...v, [r.data.task.id]: r.data.task.version }));
+      // 다시 읽기도 같은 전환으로 묶어, 새 값이 화면에 올 때까지 재정렬 잠금(reordering)을 유지한다
+      startReorder(() => router.refresh());
     });
   }
 
@@ -286,7 +292,7 @@ function SortableRow({
   onClick?: () => void;
   children: ReactNode;
 }) {
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id, disabled: !canReorder || locked });
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging, isOver } = useSortable({ id, disabled: !canReorder || locked });
   const rowRef = useRef<HTMLTableRowElement | null>(null);
   useEffect(() => {
     if (focused) rowRef.current?.scrollIntoView({ block: 'center' });
@@ -300,6 +306,7 @@ function SortableRow({
       data-testid={`task-row-${id}`}
       aria-current={focused ? 'true' : undefined}
       data-dragging={isDragging || undefined}
+      data-over={(isOver && !isDragging) || undefined}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={`${className} ${focused ? 'bg-brand-soft/70' : ''} ${isDragging ? 'relative z-10 bg-background shadow-md' : ''}`}
       onClick={onClick}

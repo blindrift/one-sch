@@ -242,6 +242,8 @@ export async function createIssue(
  * expectDrag(기본 true)면 놓기 전에 끌기 상태(data-dragging)가 될 때까지 기다린다. 끌 수 없는 경우(VIEWER·보관)는 false.
  */
 export async function dragTo(page: Page, from: Locator, to: Locator, opts: { toY?: 'top' | 'center'; expectDrag?: boolean } = {}) {
+  // 직전 끌기의 되돌림 애니메이션(transform transition)이 끝나 자리가 멈출 때까지 기다린 뒤 좌표를 잰다(hover 는 안정 상태를 기다린다)
+  await from.hover();
   const a = await from.boundingBox();
   const b = await to.boundingBox();
   if (!a || !b) throw new Error('끌 대상이 보이지 않습니다.');
@@ -253,7 +255,11 @@ export async function dragTo(page: Page, from: Locator, to: Locator, opts: { toY
   await page.mouse.down();
   await page.mouse.move(x0 + 8, y0 + 8, { steps: 2 });
   for (let i = 1; i <= 10; i += 1) await page.mouse.move(x0 + ((x1 - x0) * i) / 10, y0 + ((y1 - y0) * i) / 10, { steps: 2 });
-  if (opts.expectDrag !== false) await page.locator('[data-dragging]').first().waitFor();
+  if (opts.expectDrag !== false) {
+    // 끌기가 시작됐고, dnd-kit 이 목표(열·행) 위라고 판정한 뒤에 놓는다(T-16: 목표의 data-over)
+    await page.locator('[data-dragging]').first().waitFor();
+    await expect(to).toHaveAttribute('data-over', 'true');
+  }
   await page.mouse.up();
 }
 
@@ -273,11 +279,17 @@ export async function keyboardPickUp(page: Page, target: Locator) {
   await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
 }
 
-/** 끌 수 없는 요소에 키보드 끌기를 시도하고 끌기 상태가 되지 않았음을 확인한다(MEMBER 와 같은 절차·대기) */
+/**
+ * 끌 수 없는 요소에 키보드 끌기를 시도하고 끌기 상태가 되지 않았음을 확인한다(MEMBER 와 같은 절차·대기).
+ * 핵심 단언: Space 뒤 (1) 낭독 영역에 집기 문구("…를 들었습니다")가 없고 (2) aria-pressed 가 true 가 아니며
+ * (3) '끌 수 있는 항목' 표시(aria-roledescription)가 없다. DB·서버 요청 불변은 호출한 테스트가 따로 확인한다.
+ */
 export async function keyboardPickUpDenied(page: Page, target: Locator) {
   await target.focus();
   await page.keyboard.press('Space');
   await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  // 대조: MEMBER 는 같은 시점에 집기 문구가 낭독 영역에 나온다(keyboardPickUp 뒤 board.spec 의 문구 대기)
+  await expect(dndAnnouncer(page)).not.toContainText('들었습니다');
   await expect(target).not.toHaveAttribute('aria-roledescription', /.+/);
   await expect(target).not.toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('ArrowRight');

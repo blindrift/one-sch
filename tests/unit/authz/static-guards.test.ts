@@ -626,6 +626,11 @@ describe('마크다운·HTML 주입 정적 검사', () => {
       .map((i) => i.module);
   }
 
+  /** `import 'server-only';`(부수 효과 import, 별칭·타입 import·주석은 인정하지 않음)가 있는지 */
+  function importsServerOnly(sf: ts.SourceFile, file: string): boolean {
+    return collectImports(sf, file).some((i) => i.module === 'server-only' && i.kind === 'side-effect');
+  }
+
   /** react-markdown·remark-gfm 은 markdown.tsx 에서만, 'use client' 파일은 markdown.tsx 를 import 하지 않는다 */
   function markdownBoundaryProblems(relPath: string, sf: ts.SourceFile, file: string): string[] {
     const problems: string[] = [];
@@ -644,8 +649,7 @@ describe('마크다운·HTML 주입 정적 검사', () => {
 
   it("react-markdown 은 components/markdown.tsx 에서만 쓰고, 그 파일은 'server-only' 이며 'use client' 파일이 import 하지 않는다", () => {
     const problems = srcFiles.flatMap((f) => markdownBoundaryProblems(rel(f), parse(f), f).map((p) => `${rel(f)}: ${p}`));
-    const md = collectImports(parse(join(ROOT, MD)), join(ROOT, MD));
-    if (!md.some((i) => i.module === 'server-only' && i.kind === 'side-effect')) problems.push(`${MD}: import 'server-only' 없음`);
+    if (!importsServerOnly(parse(join(ROOT, MD)), join(ROOT, MD))) problems.push(`${MD}: import 'server-only' 없음`);
     expect(problems).toEqual([]);
   });
 
@@ -668,6 +672,15 @@ describe('마크다운·HTML 주입 정적 검사', () => {
       expect(bannedImports(sfOf("const m = await import('rehype-raw');"), fake)).toEqual(['rehype-raw']);
       expect(bannedImports(sfOf("import x from 'markdown-it/lib/x';"), fake)).toEqual(['markdown-it/lib/x']);
       expect(bannedImports(sfOf("import x from 'rehype-sanitize';"), fake)).toEqual([]);
+    });
+
+    it("'server-only' 규칙: 부수 효과 import 만 인정하고 주석·이름 import·동적 import·빠짐은 잡는다(T-14)", () => {
+      expect(importsServerOnly(sfOf("import 'server-only';\nexport const x = 1;"), fake)).toBe(true);
+      expect(importsServerOnly(sfOf("// import 'server-only';\nexport const x = 1;"), fake)).toBe(false);
+      expect(importsServerOnly(sfOf("import x from 'server-only';\nvoid x;"), fake)).toBe(false);
+      expect(importsServerOnly(sfOf("void import('server-only');"), fake)).toBe(false);
+      expect(importsServerOnly(sfOf("const s = 'server-only';"), fake)).toBe(false);
+      expect(importsServerOnly(sfOf('export const x = 1;'), fake)).toBe(false);
     });
 
     it("markdown.tsx 밖의 react-markdown, 'use client' 파일의 markdown import 를 잡는다", () => {

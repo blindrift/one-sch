@@ -159,3 +159,26 @@ test('이슈 보드 충돌·삭제: 다른 사람이 바꾼 이슈는 사유를 
   await expect(page.getByTestId(`board-card-${gone.id}`)).toHaveCount(0);
   expect(await auditActions()).not.toContain('issue.update');
 });
+
+test('이슈 보드: 카드 둘을 연달아 빠르게 끌어도 각 카드는 놓은 열에 남고 DB 도 같다(F1·L-8, T-11)', async ({ page, context }) => {
+  const m = await createUser('MEMBER');
+  const p = await createProject(m.id, { key: 'FST' });
+  const one = await createIssue(p.id, m.id, { title: '첫 카드' });
+  const two = await createIssue(p.id, m.id, { title: '둘째 카드' });
+  await injectSession(context, m.id);
+
+  await gotoReady(page, '/projects/FST/board?kind=issue');
+  // 첫 저장 응답을 기다리지 않고 바로 둘째를 끈다
+  await dragTo(page, page.getByTestId(`board-card-${one.id}`), page.getByTestId('board-col-RESOLVED'));
+  await dragTo(page, page.getByTestId(`board-card-${two.id}`), page.getByTestId('board-col-CLOSED'));
+  await expect(page.getByTestId('board-col-RESOLVED').getByTestId(`board-card-${one.id}`)).toBeVisible();
+  await expect(page.getByTestId('board-col-CLOSED').getByTestId(`board-card-${two.id}`)).toBeVisible();
+  const status = async (id: string) => (await ownerDb.issue.findUniqueOrThrow({ where: { id } })).status;
+  await expect.poll(() => status(one.id)).toBe('RESOLVED');
+  await expect.poll(() => status(two.id)).toBe('CLOSED');
+  // 저장이 끝난 뒤 다시 읽어도(L-8 resync) 같은 자리
+  await page.reload();
+  await expect(page.getByTestId('board-col-RESOLVED').getByTestId(`board-card-${one.id}`)).toBeVisible();
+  await expect(page.getByTestId('board-col-CLOSED').getByTestId(`board-card-${two.id}`)).toBeVisible();
+  await expect(page.getByTestId('board-message')).toHaveCount(0);
+});

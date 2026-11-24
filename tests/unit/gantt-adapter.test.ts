@@ -215,3 +215,16 @@ describe('shortRange (표의 짧은 기간)', () => {
     expect(shortRange('2026-12-28', '2027-01-03')).toBe('12.28 ~ 01.03');
   });
 });
+
+describe('정렬 동점(T-12)', () => {
+  it('sortOrder 가 같으면 id 순(목록 탭·DB 쿼리와 같은 순서), 입력 순서와 무관', () => {
+    const z = task({ id: 'zz', sortOrder: 5 });
+    const a = task({ id: 'aa', sortOrder: 5 });
+    const m = task({ id: 'mm', sortOrder: 5 });
+    const first = task({ id: 'yy', sortOrder: 1 });
+    for (const input of [[z, a, m, first], [m, first, a, z]]) {
+      const rows = toGanttRows({ projects: [P], tasks: input, users: [], today: '2026-11-01' });
+      expect(rows.slice(1).map((r) => r.id)).toEqual(['yy', 'aa', 'mm', 'zz']);
+    }
+  });
+});

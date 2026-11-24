@@ -150,6 +150,23 @@
 1회차 수정 뒤 검증: typecheck·lint 통과, 단위 35파일 531건, 단위+통합 `--sequence.shuffle` 50파일 698건(3회 통과), E2E 전체 46건(build 포함), 바뀐 3개 스펙 `--repeat-each=3` 42건, `npm audit --omit=dev` 0건.
 F2(id 2차 정렬)로 sortOrder 가 같은 작업의 순서가 id 순이 되어, 삽입 순서에 기대던 `timeline-service.test` 한 건에 sortOrder 를 명시했다.
 
+### 8.2 2회차 수정(developer)
+
+| 항목 | 처리 |
+|---|---|
+| S-6 | 댓글 상한을 둘로: 살아 있는 댓글 1,000개(지우면 다시 쓸 수 있음) + 지운 것 포함 저장 행 5,000개. 둘 다 VALIDATION `comment_limit`. 통합 테스트 2건(1,000 → 지운 뒤 재작성 허용, 지운 행 4,999 + 1 → 5,001번째 거부) |
+| L-8 | 보드 `useServerState`: 저장 중 온 서버 값은 적용하지 않고 `skipped` 만 남김. 저장이 모두 끝나면(pending 0) 건너뛴 값을 쓰지 않고 `router.refresh()` 한 번 |
+| L-9 | 목록 재정렬: 응답의 `task.version` 을 로컬(versions)에 바로 반영해 다음 요청에 쓰고, 다시 읽기를 같은 전환(`startReorder`)으로 감싸 새 값이 올 때까지 잠금 유지 |
+| T-11 | 이슈 카드 둘을 응답을 기다리지 않고 연달아 끌기 → 각 열 유지, DB, 새로고침 뒤에도 같은 자리, 오류 메시지 없음 |
+| T-12 | gantt-adapter 동점 id 순(입력 순서 두 가지), `listTaskOptions` 부모 → 자식 → 손자 → 다음 형제 |
+| T-13 | `keyboardPickUpDenied`: Space 뒤 낭독 영역에 집기 문구 없음 대조, 핵심 단언 주석 |
+| T-14 | `'server-only'` 규칙을 `importsServerOnly` 로 빼고 음성 검증(주석·이름 import·동적 import·문자열·빠짐) |
+| T-15 | 지운 댓글 원문 부재 검사에 살아 있는 댓글 본문 존재 양성 대조 |
+| T-16 | 보드 열·목록 행에 `data-over`, `dragTo` 가 목표의 `data-over` 를 기다린 뒤 놓음 |
+
+2회차 검증(모두 종료 코드 0 확인): typecheck·lint 통과, 단위 35파일 533건, 단위+통합 `--sequence.shuffle` 50파일 702건, E2E 전체 47건(build 포함), 바뀐 3개 스펙 `--repeat-each=3` 45건, `npm audit --omit=dev` 0건.
+첫 반복 실행에서 행 순서 E2E 가 3회 중 1회 실패했다(직전 끌기의 되돌림 애니메이션 중에 좌표를 재서 손잡이를 놓침). `dragTo` 가 `hover()` 로 안정 상태를 기다린 뒤 좌표를 재게 고쳐 이후 반복 전부 통과.
+
 ## 9. 실행 방법 메모
 
 NAS 호스트에서는 Prisma 가 segfault 하므로 1·2단계와 같이 `mcr.microsoft.com/playwright:v1.65.1-noble` 컨테이너(`--network host`, `node_modules` 는 볼륨 `one-sch-test-nm`, Node 22 는 볼륨 `one-sch-test-node22`)에서 실행했다. 의존성 설치는 같은 컨테이너에서 `npx npm@11.6.2 install --save-exact …`(4절 참고).

@@ -3,7 +3,7 @@ import { prisma } from '@/server/db';
 import { DEFAULT_ISSUE_QUERY, PAGE_SIZE, type IssueListQuery } from '@/lib/list-query';
 import * as comments from '@/server/services/comment-service';
 import * as issues from '@/server/services/issue-service';
-import { escapeLike, getIssueDetail, listIssues, loadIssueBoard } from '@/server/services/issue-query-service';
+import { escapeLike, getIssueDetail, listIssues, listTaskOptions, loadIssueBoard } from '@/server/services/issue-query-service';
 import { disconnectAll, resetDb, stringifyRow } from '../helpers/db';
 
 const meta = { ip: '127.0.0.1', userAgent: 'vitest' };
@@ -139,6 +139,20 @@ describe('getIssueDetail', () => {
     expect(await getIssueDetail('nope')).toBeNull();
     expect(await getIssueDetail('ERP-1', ops)).toBeNull();
     expect(await getIssueDetail('ERP-1', erp)).not.toBeNull();
+  });
+});
+
+describe('listTaskOptions(T-12)', () => {
+  it('간트 순서: 부모 → 그 자식 → 다음 형제(sortOrder 가 자식보다 작아도), 다른 프로젝트 제외', async () => {
+    const D = new Date('2026-11-01');
+    const mk = (title: string, sortOrder: number, parentId: string | null = null, projectId = erp) =>
+      prisma.task.create({ data: { projectId, title, startDate: D, endDate: D, sortOrder, parentId } });
+    const p = await mk('부모', 1);
+    await mk('다음 형제', 2);
+    const c = await mk('자식', 3, p.id);
+    await mk('손자', 4, c.id);
+    await mk('다른 프로젝트', 0, null, ops);
+    expect((await listTaskOptions(erp)).map((t) => t.title)).toEqual(['부모', '자식', '손자', '다음 형제']);
   });
 });
 

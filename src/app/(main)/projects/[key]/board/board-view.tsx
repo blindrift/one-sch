@@ -17,7 +17,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { CircleAlert, X } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useId, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { IssuePriorityBadge } from '@/components/issues/issue-badges';
 import { issueColumns, taskColumns, type BoardColumns } from '@/lib/board';
 import type { IssueListItem } from '@/lib/issue/dto';
@@ -54,22 +54,34 @@ type Message = { kind: 'error'; text: string };
 
 /**
  * 서버 값이 새로 오면(router.refresh·이동) 낙관 상태를 버리고 다시 시작한다.
- * 저장 중(busy)에 온 서버 값은 저장 전에 읽은 값일 수 있어 덮어쓰지 않는다(저장 결과는 응답 값으로 반영한다).
+ * 저장 중(busy)에 온 서버 값은 저장 커밋 전에 읽은 값일 수 있어 적용하지 않고 건너뛴 표시만 남긴다.
+ * 저장이 모두 끝나면(busy 해제) 건너뛴 값을 쓰지 않고 resync(서버에서 다시 읽기)를 한 번 부른다.
  */
-function useServerState<T>(value: T, busy: boolean): [T, (next: T | ((prev: T) => T)) => void] {
+function useServerState<T>(value: T, busy: boolean, resync: () => void): [T, (next: T | ((prev: T) => T)) => void] {
   const [source, setSource] = useState(value);
   const [state, setState] = useState(value);
+  const [skipped, setSkipped] = useState(false);
   if (source !== value) {
     setSource(value);
-    if (!busy) setState(value);
+    if (busy) setSkipped(true);
+    else {
+      setState(value);
+      setSkipped(false);
+    }
   }
+  useEffect(() => {
+    if (busy || !skipped) return;
+    setSkipped(false);
+    resync();
+  }, [busy, skipped, resync]);
   return [state, setState];
 }
 
 export function TaskBoard({ project, data, canEdit, includeParents }: { project: ProjectDto; data: TimelineData; canEdit: boolean; includeParents: boolean }) {
   const router = useRouter();
   const [pending, setPending] = useState(0);
-  const [tasks, setTasks] = useServerState(data.tasks, pending > 0);
+  const resync = useCallback(() => router.refresh(), [router]);
+  const [tasks, setTasks] = useServerState(data.tasks, pending > 0, resync);
   const [message, setMessage] = useState<Message | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const saving = useRef(new Set<string>());
@@ -170,7 +182,8 @@ export function IssueBoard({ issues, truncated, canEdit, today }: { issues: Issu
   const pathname = usePathname();
   const params = useSearchParams();
   const [pending, setPending] = useState(0);
-  const [items, setItems] = useServerState(issues, pending > 0);
+  const resync = useCallback(() => router.refresh(), [router]);
+  const [items, setItems] = useServerState(issues, pending > 0, resync);
   const [message, setMessage] = useState<Message | null>(null);
   const saving = useRef(new Set<string>());
   const cols: BoardColumns<IssueStatus, IssueListItem> = issueColumns(items);
@@ -333,6 +346,7 @@ function Column({ status, label, color, count, children }: { status: string; lab
       ref={setNodeRef}
       aria-label={`${label} 열`}
       data-testid={`board-col-${status}`}
+      data-over={isOver || undefined}
       className={`flex w-72 shrink-0 flex-col rounded-xl border bg-surface-muted/70 ${isOver ? 'border-brand/60 bg-brand-soft/60' : 'border-line'}`}
     >
       <h2 className="flex items-center gap-2 px-3 pt-3 pb-2 text-xs font-semibold">
