@@ -38,6 +38,10 @@ export const ACTION_POLICY: Record<string, Policy> = {
   'issue.createIssue': { min: 'MEMBER' },
   'issue.updateIssue': { min: 'MEMBER' },
   'issue.deleteIssue': { min: 'MEMBER' },
+
+  'comment.addComment': { min: 'VIEWER' },
+  'comment.updateComment': { min: 'VIEWER' },
+  'comment.deleteComment': { min: 'VIEWER' },
 };
 
 export const PUBLIC_ACTIONS = Object.entries(ACTION_POLICY)
