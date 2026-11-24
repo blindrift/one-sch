@@ -26,7 +26,7 @@ export default function AboutPage() {
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold tracking-tight text-foreground">이용 대상과 로그인</h2>
         <p>
-          관리자가 허용한 사용자만 쓸 수 있습니다. Google 계정으로 로그인하며, Google 에서는 로그인 확인에 필요한 이메일 주소와
+          관리자가 승인한 사용자만 쓸 수 있습니다(처음 로그인하면 가입 신청이 됩니다). Google 계정으로 로그인하며, Google 에서는 로그인 확인에 필요한 이메일 주소와
           이름, 프로필 사진만 받습니다. 자세한 내용은{' '}
           <Link href="/privacy" className="font-medium text-brand underline-offset-4 hover:underline">
             개인정보처리방침

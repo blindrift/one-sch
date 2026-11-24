@@ -213,4 +213,56 @@ describe('user-service', () => {
     const admin = await makeUser('admin@example.com', 'ADMIN');
     expect(await reasonOf(users.unlockUser(admin, '00000000-0000-4000-8000-000000000000', meta))).toBe('NOT_FOUND:');
   });
+
+  describe('가입 승인', () => {
+    async function makePending(email: string) {
+      return prisma.user.create({ data: { email, name: 'p', active: false, approval: 'PENDING' } });
+    }
+
+    it('approveUser: 고른 역할로 승인·활성화·감사, 이미 승인이면 CONFLICT', async () => {
+      const admin = await makeUser('admin@example.com', 'ADMIN');
+      const p = await makePending('p@example.com');
+      await users.approveUser(admin, p.id, 'MEMBER', meta);
+      expect(await prisma.user.findUniqueOrThrow({ where: { id: p.id } })).toMatchObject({ approval: 'APPROVED', active: true, role: 'MEMBER' });
+      expect(await prisma.auditLog.count({ where: { action: 'user.signup.approve', entityId: p.id, actorId: admin.id } })).toBe(1);
+      expect(await reasonOf(users.approveUser(admin, p.id, 'VIEWER', meta))).toBe('CONFLICT:already_approved');
+    });
+
+    it('rejectUser: PENDING 만 REJECTED 로 보관, 거부된 계정도 나중에 승인 가능', async () => {
+      const admin = await makeUser('admin@example.com', 'ADMIN');
+      const p = await makePending('p@example.com');
+      await users.rejectUser(admin, p.id, meta);
+      expect(await prisma.user.findUniqueOrThrow({ where: { id: p.id } })).toMatchObject({ approval: 'REJECTED', active: false });
+      expect(await reasonOf(users.rejectUser(admin, p.id, meta))).toBe('CONFLICT:not_pending');
+      expect(await reasonOf(users.rejectUser(admin, admin.id, meta))).toBe('CONFLICT:not_pending');
+      await users.approveUser(admin, p.id, 'VIEWER', meta);
+      expect(await prisma.user.findUniqueOrThrow({ where: { id: p.id } })).toMatchObject({ approval: 'APPROVED', active: true });
+    });
+
+    it('승인 안 된 계정은 활성화로 우회할 수 없다(서비스·DB CHECK)', async () => {
+      const admin = await makeUser('admin@example.com', 'ADMIN');
+      const p = await makePending('p@example.com');
+      expect(await reasonOf(users.setUserActive(admin, p.id, true, meta))).toBe('CONFLICT:not_approved');
+      await expect(prisma.user.update({ where: { id: p.id }, data: { active: true } })).rejects.toThrow();
+    });
+
+    it('deleteUnapprovedUser: 대기·거부만 삭제·감사, 승인 계정은 CONFLICT', async () => {
+      const admin = await makeUser('admin@example.com', 'ADMIN');
+      const p = await makePending('p@example.com');
+      await users.rejectUser(admin, p.id, meta);
+      await users.deleteUnapprovedUser(admin, p.id, meta);
+      expect(await prisma.user.findUnique({ where: { id: p.id } })).toBeNull();
+      expect(await prisma.auditLog.count({ where: { action: 'user.delete', entityId: p.id } })).toBe(1);
+      const member = await makeUser('m@example.com', 'MEMBER');
+      expect(await reasonOf(users.deleteUnapprovedUser(admin, member.id, meta))).toBe('CONFLICT:approved');
+    });
+
+    it('listUsers 는 approval 을 함께 돌려준다', async () => {
+      await makeUser('admin@example.com', 'ADMIN');
+      await makePending('p@example.com');
+      const rows = await users.listUsers();
+      expect(rows.find((r) => r.email === 'p@example.com')?.approval).toBe('PENDING');
+      expect(rows.find((r) => r.email === 'admin@example.com')?.approval).toBe('APPROVED');
+    });
+  });
 });

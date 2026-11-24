@@ -331,13 +331,20 @@ sequenceDiagram
   B->>A: /api/auth/callback/google
   A->>G: 토큰 교환, ID 토큰 검증
   A->>D: email 로 User 조회
-  alt 미등록 또는 비활성 또는 email_verified=false
+  alt email_verified=false 또는 승인 후 비활성
     A-->>B: 로그인 거부 (감사 로그 auth.login.denied)
-  else 등록·활성
+  else 미등록
+    A->>D: 가입 신청 User 생성 (approval=PENDING, active=false, VIEWER, 감사 user.signup.request)
+    A-->>B: /login?error=pending "승인 대기" 안내 (세션 없음)
+  else PENDING 또는 REJECTED
+    A-->>B: /login?error=pending | rejected 안내 (새 신청 없음)
+  else 승인·활성
     A->>D: Session 생성
     A-->>B: 세션 쿠키 발급 → /timeline
   end
 ```
+
+가입 승인: 관리자가 /admin/users 의 "가입 승인 대기"에서 역할(기본 VIEWER)을 골라 승인(APPROVED·활성)하거나 거부(REJECTED 로 보관)한다. 거부된 계정은 나중에 승인하거나 삭제할 수 있고, 삭제하면 다음 로그인 때 새 신청이 생긴다. DB CHECK 로 승인되지 않은 계정은 활성일 수 없다.
 
 ```mermaid
 sequenceDiagram

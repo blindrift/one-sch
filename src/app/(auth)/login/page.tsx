@@ -37,12 +37,22 @@ export default async function LoginPage({
     >
       <div className="flex flex-col gap-1.5 pb-6 text-center">
         <h1 className="text-xl font-semibold tracking-tight">one-sch 로그인</h1>
-        <p className="text-sm text-muted-foreground">등록된 계정만 로그인할 수 있습니다.</p>
+        <p className="text-sm text-muted-foreground">처음이면 구글로 로그인해 가입을 신청하세요. 관리자 승인 후 사용할 수 있습니다.</p>
       </div>
       <div className="flex flex-col gap-5">
-        {error ? (
+        {error === 'pending' ? (
+          <Alert data-testid="login-pending">
+            <AlertDescription>
+              가입 신청이 접수되었습니다. 관리자가 승인하면 같은 구글 계정으로 로그인할 수 있습니다.
+            </AlertDescription>
+          </Alert>
+        ) : error === 'rejected' ? (
+          <Alert variant="destructive" data-testid="login-rejected">
+            <AlertDescription>가입이 거부된 계정입니다. 필요하면 관리자에게 문의해 주세요.</AlertDescription>
+          </Alert>
+        ) : error ? (
           <Alert variant="destructive">
-            <AlertDescription>등록되지 않았거나 사용할 수 없는 계정입니다.</AlertDescription>
+            <AlertDescription>사용할 수 없는 계정입니다. 관리자에게 문의해 주세요.</AlertDescription>
           </Alert>
         ) : null}
         <form action={signInWithGoogle}>
