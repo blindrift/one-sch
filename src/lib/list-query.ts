@@ -34,7 +34,6 @@ function parseAssignee(v: string | undefined): string | null {
 /** 검색어: 앞뒤 공백을 지우고 연속 공백을 하나로, 최대 SEARCH_MAX 자. 제어 문자가 있으면 버린다 */
 function parseQ(v: string | undefined): string {
   if (!v) return '';
-  // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f]/.test(v)) return '';
   return v.trim().replace(/\s+/g, ' ').slice(0, SEARCH_MAX);
 }
